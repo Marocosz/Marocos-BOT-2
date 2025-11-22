@@ -1,15 +1,18 @@
 import discord
 import random
 from discord.ext import commands
+import unicodedata
+
 from src.services.riot_api import RiotAPI
 from src.database.repositories import PlayerRepository
+
 
 # View do Botão (Continua igual, pois botões são ótimos para segurança)
 class VerifyView(discord.ui.View):
     def __init__(self, bot, ctx, riot_service, puuid, target_icon_id, account_data, lanes):
         super().__init__(timeout=180)
         self.bot = bot
-        self.ctx = ctx # Contexto do comando de texto
+        self.ctx = ctx
         self.riot_service = riot_service
         self.puuid = puuid
         self.target_icon_id = target_icon_id
@@ -22,7 +25,7 @@ class VerifyView(discord.ui.View):
             await interaction.response.send_message("Ei, saia daqui! Use .registrar para fazer o seu.", ephemeral=True)
             return
 
-        await interaction.response.defer() # Carregando...
+        await interaction.response.defer()
 
         try:
             summoner_data = await self.riot_service.get_summoner_by_puuid(self.puuid)
@@ -30,7 +33,7 @@ class VerifyView(discord.ui.View):
 
             if current_icon == self.target_icon_id:
                 full_data = {**self.account_data, 'profileIconId': current_icon}
-                
+
                 await PlayerRepository.upsert_player(
                     discord_id=self.ctx.author.id,
                     riot_data=full_data,
@@ -41,23 +44,33 @@ class VerifyView(discord.ui.View):
                 embed = discord.Embed(title="✅ Identidade Confirmada!", color=0x00ff00)
                 embed.description = f"Conta **{self.account_data['gameName']}** vinculada com sucesso."
                 embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{current_icon}.png")
-                
+
                 self.clear_items()
                 await interaction.edit_original_response(embed=embed, view=self)
                 self.stop()
             else:
                 await interaction.followup.send(
-                    f"❌ Ícone incorreto! Atual: **{current_icon}** | Necessário: **{self.target_icon_id}**.", ephemeral=True
+                    f"❌ Ícone incorreto! Atual: **{current_icon}** | Necessário: **{self.target_icon_id}**.",
+                    ephemeral=True
                 )
         except Exception as e:
             print(f"Erro verify: {e}")
+
 
 class Auth(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.riot_service = RiotAPI()
 
-    # Helper para limpar o texto que o usuário digita
+    # Remove caracteres invisíveis (problema comum vindo de celular)
+    def remove_invisible(self, text: str):
+        if not text:
+            return text
+        return "".join(
+            c for c in text
+            if unicodedata.category(c) != "Cf"
+        )
+
     def clean_lane(self, lane_input: str):
         if not lane_input: return None
         l = lane_input.lower().strip()
@@ -70,28 +83,54 @@ class Auth(commands.Cog):
         return None
 
     @commands.command(name="registrar")
-    async def registrar(self, ctx, riot_id: str = None, main_lane: str = None, sec_lane: str = None):
+    async def registrar(self, ctx, *, args: str = None):
         """
         Uso: .registrar Nick#TAG MainLane [SecLane]
         Ex: .registrar Marocos#BR1 Mid Top
         """
-        # Validação de Argumentos
-        if not riot_id or not main_lane:
+
+        # --- PARSER NOVO (ACEITA ESPAÇOS + EMOJIS + UNICODE) ---
+
+        if not args:
             embed = discord.Embed(title="❌ Formato Inválido", color=0xff0000)
             embed.description = (
                 "Você precisa informar o Nick e a Lane Principal.\n\n"
-                "**Exemplo de uso:**\n"
+                "**Exemplo:**\n"
                 "`.registrar Faker#KR1 Mid`\n"
-                "`.registrar Marocos#BR1 Jungle Top`"
+                "`.registrar Eric ツ#2000 Jungle Top`"
             )
             await ctx.reply(embed=embed)
             return
+
+        parts = args.split()
+
+        if len(parts) < 2:
+            await ctx.reply("❌ Você precisa informar pelo menos Nick#TAG e a lane principal.")
+            return
+
+        main_lane = parts[-1]
+        sec_lane = None
+
+        if len(parts) >= 3:
+            possible_sec = parts[-2]
+            if self.clean_lane(possible_sec):
+                sec_lane = possible_sec
+                riot_id = " ".join(parts[:-2])
+            else:
+                riot_id = " ".join(parts[:-1])
+        else:
+            riot_id = " ".join(parts[:-1])
+
+        # --- REMOVE CARACTERES INVISÍVEIS ← IMPORTANTE! ---
+        riot_id = self.remove_invisible(riot_id).strip()
+
+        # ---------------------------------------------------------
 
         if "#" not in riot_id:
             await ctx.reply("❌ O Nick deve ter a TAG. Ex: `Nome#BR1`")
             return
 
-        # Limpeza das Lanes
+        # Limpeza das lanes
         m_lane_clean = self.clean_lane(main_lane)
         s_lane_clean = self.clean_lane(sec_lane)
 
@@ -99,13 +138,12 @@ class Auth(commands.Cog):
             await ctx.reply("❌ Lane principal inválida! Use: Top, Jungle, Mid, Adc ou Sup.")
             return
 
-        # Processo de Registro (API)
         msg_wait = await ctx.reply("⏳ Buscando conta na Riot...")
-        
+
         try:
             game_name, tag_line = riot_id.split("#", 1)
             account_data = await self.riot_service.get_account_by_riot_id(game_name, tag_line)
-            
+
             if not account_data:
                 await msg_wait.edit(content=f"❌ Conta **{riot_id}** não encontrada.")
                 return
@@ -113,23 +151,22 @@ class Auth(commands.Cog):
             summoner_data = await self.riot_service.get_summoner_by_puuid(account_data['puuid'])
             current_icon_id = summoner_data['profileIconId']
 
-            # Lógica do Desafio de Ícone
             target_icon_id = current_icon_id
             while target_icon_id == current_icon_id:
                 target_icon_id = random.randint(0, 28)
 
             icon_url = f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{target_icon_id}.png"
-            
+
             embed = discord.Embed(
                 title="🛡️ Verificação de Segurança",
                 description=(
-                    f"Para confirmar **{riot_id}**, troque seu ícone no LoL para a imagem abaixo.\n"
+                    f"Para confirmar **{riot_id}**, troque seu ícone no LoL para o mesmo da imagem ao lado.\n"
                     f"Depois clique no botão **Verificar**."
                 ),
                 color=0xffcc00
             )
             embed.set_thumbnail(url=icon_url)
-            
+
             view = VerifyView(
                 bot=self.bot,
                 ctx=ctx,
@@ -140,7 +177,7 @@ class Auth(commands.Cog):
                 lanes={'main': m_lane_clean, 'sec': s_lane_clean}
             )
 
-            await msg_wait.delete() # Apaga a msg de "carregando"
+            await msg_wait.delete()
             await ctx.reply(embed=embed, view=view)
 
         except Exception as e:
