@@ -3,7 +3,7 @@ import asyncio
 from discord.ext import commands
 from src.database.repositories import PlayerRepository
 from src.services.riot_api import RiotAPI
-from src.services.matchmaker import MatchMaker # <--- IMPORT NOVO
+from src.services.matchmaker import MatchMaker
 
 class Ranking(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -20,13 +20,18 @@ class Ranking(commands.Cog):
         return emoji_map.get(tier, '⚫')
 
     def get_queue_name(self, queue_id: int):
+        # Nomes mais específicos e curtos para caber na coluna
         queues = {
-            420: "Solo/Duo", 440: "Flex 5v5", 450: "ARAM", 
-            490: "Quickplay", 1700: "Arena", 1900: "URF"
+            420: "Solo/Duo", 
+            440: "Flex 5v5", 
+            450: "ARAM", 
+            490: "Quickplay", 
+            1700: "Arena", 
+            1900: "URF"
         }
         return queues.get(queue_id, "Normal")
 
-    # --- COMANDO PERFIL ---
+    # --- COMANDO PERFIL (MANTIDO INTACTO) ---
     @commands.command(name="perfil")
     async def perfil(self, ctx, jogador: discord.Member = None):
         """Exibe o cartão de jogador COMPLETO e Atualiza MMR."""
@@ -44,57 +49,75 @@ class Ranking(commands.Cog):
             live_icon_id = player.riot_icon_id 
 
             try:
+                # 1. Busca Dados Basicos (Level e Icone ATUAL)
                 summoner_data = await self.riot_service.get_summoner_by_puuid(player.riot_puuid)
                 if summoner_data:
                     summoner_level = summoner_data.get('summonerLevel', 'N/A')
                     live_icon_id = summoner_data.get('profileIconId')
 
+                # 2. Busca Rank e Maestria
                 riot_ranks = await self.riot_service.get_rank_by_puuid(player.riot_puuid)
                 top_mastery = await self.riot_service.get_top_mastery(player.riot_puuid)
                 
-                # --- LÓGICA NOVA DE MMR ---
-                solo = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
+                # --- ATUALIZAÇÃO DE MMR (LÓGICA NOVA) ---
+                # Tenta usar SoloQ para o MMR. Se não tiver, usa Flex como fallback.
+                mmr_source = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
                 
-                if solo:
-                    # 1. Calcula o MMR Real usando a classe MatchMaker
+                if not mmr_source:
+                    mmr_source = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
+
+                if mmr_source:
+                    # Calcula usando a nova classe MatchMaker V2 (com peso de fila e winrate)
                     new_mmr = MatchMaker.calculate_adjusted_mmr(
-                        tier=solo['tier'], 
-                        rank=solo['rank'], 
-                        lp=solo['leaguePoints'], 
-                        wins=solo['wins'], 
-                        losses=solo['losses']
+                        tier=mmr_source['tier'], 
+                        rank=mmr_source['rank'], 
+                        lp=mmr_source['leaguePoints'], 
+                        wins=mmr_source['wins'], 
+                        losses=mmr_source['losses'],
+                        queue_type=mmr_source['queueType'] # Passamos o tipo da fila para aplicar penalidade se for Flex
                     )
                     
-                    # 2. Salva no Banco (Wins, Losses e MMR)
+                    # Salva no Banco
                     await PlayerRepository.update_riot_rank(
                         discord_id=player.discord_id, 
-                        tier=solo['tier'], 
-                        rank=solo['rank'], 
-                        lp=solo['leaguePoints'],
-                        wins=solo['wins'],
-                        losses=solo['losses'],
+                        tier=mmr_source['tier'], 
+                        rank=mmr_source['rank'], 
+                        lp=mmr_source['leaguePoints'],
+                        wins=mmr_source['wins'],
+                        losses=mmr_source['losses'],
                         calculated_mmr=new_mmr
                     )
                     
-                    # 3. Atualiza objeto local para exibir o valor novo imediatamente no card
+                    # Atualiza objeto local para o card mostrar o valor novo
                     player.mmr = new_mmr
-                    player.solo_wins = solo['wins']
-                    player.solo_losses = solo['losses']
+                    player.solo_wins = mmr_source['wins']
+                    player.solo_losses = mmr_source['losses']
                 else:
-                    # Se for Unranked, reseta para base (1000)
+                    # Se for Unranked total
                     await PlayerRepository.update_riot_rank(player.discord_id, "UNRANKED", "", 0, 0, 0, 1000)
                     player.mmr = 1000
                     
             except Exception as e:
                 print(f"Erro API Riot: {e}")
 
-            # --- DESIGN DO CARD (MANTIDO) ---
+            # --- DESIGN DO CARD (MANTIDO ORIGINAL) ---
             embed_color = 0x2b2d31 
             solo = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
             flex = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
 
             if solo:
-                tier_colors = {'IRON': 0x564b49, 'BRONZE': 0x8c5133, 'SILVER': 0xc0c0c0, 'GOLD': 0xffd700, 'PLATINUM': 0x2ecc71, 'EMERALD': 0x009475, 'DIAMOND': 0x3498db, 'MASTER': 0x9b59b6, 'GRANDMASTER': 0xe74c3c, 'CHALLENGER': 0xf1c40f}
+                tier_colors = {
+                    'IRON': 0x564b49, 
+                    'BRONZE': 0x8c5133, 
+                    'SILVER': 0xc0c0c0, 
+                    'GOLD': 0xffd700, 
+                    'PLATINUM': 0x2ecc71, 
+                    'EMERALD': 0x009475, 
+                    'DIAMOND': 0x3498db, 
+                    'MASTER': 0x9b59b6, 
+                    'GRANDMASTER': 0xe74c3c, 
+                    'CHALLENGER': 0xf1c40f
+                }
                 embed_color = tier_colors.get(solo['tier'], 0x2b2d31)
 
             embed = discord.Embed(color=embed_color)
@@ -111,8 +134,13 @@ class Ranking(commands.Cog):
 
             def format_rank_detailed(data):
                 if not data: return "```st\nUnranked\n```"
-                wins = data['wins']; losses = data['losses']; total = wins+losses; wr = (wins/total*100) if total>0 else 0
-                return f"{self.get_tier_emoji(data['tier'])} **{data['tier']} {data['rank']}**\nInfo: `{data['leaguePoints']} PDL` • `{wr:.0f}% WR`\nScore: `{wins}V` - `{losses}D`"
+                wins = data['wins']
+                losses = data['losses']
+                total = wins + losses
+                wr = (wins / total * 100) if total > 0 else 0
+                return (f"{self.get_tier_emoji(data['tier'])} **{data['tier']} {data['rank']}**\n"
+                        f"Info: `{data['leaguePoints']} PDL` • `{wr:.0f}% WR`\n"
+                        f"Score: `{wins}V` - `{losses}D`")
 
             embed.add_field(name="🛡️ Solo/Duo", value=format_rank_detailed(solo), inline=True)
             embed.add_field(name="⚔️ Flex 5v5", value=format_rank_detailed(flex), inline=True)
@@ -129,8 +157,6 @@ class Ranking(commands.Cog):
 
             embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
             
-            # In-House Stats com MMR Atualizado
-            # Nota: Jogos/Vitorias In-House continuam 0 pois ainda não temos sistema de resultado de partida
             total_ih = player.wins + player.losses
             wr_ih = (player.wins / total_ih * 100) if total_ih > 0 else 0.0
             
@@ -139,6 +165,115 @@ class Ranking(commands.Cog):
             embed.set_footer(text=f"System ID: {player.discord_id}")
 
             await ctx.reply(embed=embed)
+
+    # --- COMANDO MMR (VISUAL ANALÍTICO DETALHADO) ---
+    @commands.command(name="mmr")
+    async def mmr(self, ctx, jogador: discord.Member = None):
+        """Relatório detalhado da pontuação"""
+        target_user = jogador or ctx.author
+        player = await PlayerRepository.get_player_by_discord_id(target_user.id)
+        if not player: return await ctx.reply("❌ Jogador não registrado.")
+
+        # 1. Busca Dados Frescos
+        riot_ranks = await self.riot_service.get_rank_by_puuid(player.riot_puuid)
+        
+        data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
+        source_name = "Solo/Duo"
+        is_flex = False
+        
+        if not data:
+            data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
+            source_name = "Flex 5v5"
+            is_flex = True
+        
+        if not data:
+            await ctx.reply(f"🔍 **{player.riot_name}** é Unranked. MMR Base: 1000.")
+            return
+
+        # 2. Recálculo para Exibição (Passo a Passo)
+        
+        # Passo A: Valor do Elo
+        tier_score = MatchMaker.TIER_VALUES.get(data['tier'], 1000)
+        rank_score = MatchMaker.RANK_VALUES.get(data['rank'], 0)
+        base_raw = tier_score + rank_score + data['leaguePoints']
+        
+        # Passo B: Penalidade de Fila
+        queue_mod = 0.85 if is_flex else 1.0
+        base_adjusted = int(base_raw * queue_mod)
+        penalty_val = base_raw - base_adjusted # Quanto perdeu
+        
+        # Passo C: Desempenho (Winrate + Velocity)
+        total_games = data['wins'] + data['losses']
+        winrate = (data['wins'] / total_games * 100) if total_games > 0 else 0
+        wr_diff = winrate - 50
+        
+        # Define o Fator K (Incerteza)
+        if total_games < 50:   k_factor = 20; phase = "Calibração (Smurf?)"
+        elif total_games < 100: k_factor = 12; phase = "Subida Rápida"
+        elif total_games < 150: k_factor = 8;  phase = "Estabilizando"
+        elif total_games < 200: k_factor = 4;  phase = "Consolidação"
+        else:                   k_factor = 2;  phase = "Elo Definido"
+        
+        bonus = int(wr_diff * k_factor)
+        
+        # Resultado Final
+        final = int(base_adjusted + bonus)
+        final = max(0, final)
+
+        # --- MONTAGEM DO EMBED ---
+        embed = discord.Embed(title=f"🧮 Extrato de MMR: {player.riot_name}", color=0x2b2d31)
+        
+        # 1. O Elo Bruto
+        embed.add_field(
+            name="1️⃣ Elo Oficial",
+            value=f"**{data['tier']} {data['rank']}** ({data['leaguePoints']} PDL)\nValor Bruto: `{base_raw}` pontos",
+            inline=True
+        )
+
+        # 2. Ajuste da Fila (Visual diff para mostrar perda se houver)
+        if is_flex:
+            q_text = f"```diff\n- {penalty_val} pts (Nerf Flex 15%)\n```"
+            q_desc = "Fila Flex tem peso reduzido."
+        else:
+            q_text = f"```diff\n+ 100% (Solo/Duo)\n```"
+            q_desc = "Fila Solo conta integralmente."
+            
+        embed.add_field(name="2️⃣ Ajuste de Fila", value=f"{q_text}{q_desc}", inline=True)
+
+        # Separador
+        embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+
+        # 3. Análise de Desempenho
+        # Formata sinal de + ou -
+        sinal = "+" if bonus >= 0 else ""
+        
+        perf_explain = (
+            f"**Jogos:** {total_games} ({phase})\n"
+            f"**Winrate:** {winrate:.1f}% (Dif. da média: {wr_diff:.1f}%)\n"
+            f"**Multiplicador:** {k_factor}x\n"
+        )
+        
+        # Caixa de código para o bônus ficar destacado
+        bonus_block = f"```diff\n{sinal} {bonus} pts de Ajuste\n```"
+        
+        embed.add_field(name="3️⃣ Desempenho (Velocity)", value=perf_explain + bonus_block, inline=False)
+
+        # 4. A FÓRMULA FINAL (O que você pediu)
+        # Mostra a matemática exata com os números do usuário
+        
+        formula_visual = (
+            f"```ini\n"
+            f"[ Base Ajustada ]   [ Bônus WR ]     [ MMR FINAL ]\n"
+            f"    {base_adjusted:<5}       +    {bonus:<5}      =    {final}\n"
+            f"```"
+        )
+        
+        embed.add_field(name="🏁 Fórmula Aplicada", value=formula_visual, inline=False)
+        
+        # Rodapé explicativo
+        embed.set_footer(text=f"Cálculo: (Elo Base x Peso Fila) + ((Winrate - 50) x Fator Jogos)")
+
+        await ctx.reply(embed=embed)
 
     # --- COMANDO HISTÓRICO (MANTIDO 10 JOGOS / COLUNAS) ---
     @commands.command(name="historico")
@@ -162,6 +297,7 @@ class Ranking(commands.Cog):
 
             embed = discord.Embed(title=f"📜 Histórico (Últimas 10) - {player.riot_name}", color=0x3498db)
             
+            # Filtra partidas inválidas (None)
             valid_matches = [m for m in matches_data if m] 
             
             for i, match in enumerate(valid_matches):
@@ -174,6 +310,7 @@ class Ranking(commands.Cog):
                 kills = participant['kills']
                 deaths = participant['deaths']
                 assists = participant['assists']
+                
                 mode = self.get_queue_name(info['queueId'])
                 ago = f"<t:{int(info['gameEndTimestamp']/1000)}:R>" 
                 icon = "🟦" if win else "🟥"
@@ -184,6 +321,7 @@ class Ranking(commands.Cog):
                     inline=True
                 )
 
+                # Força 2 colunas (adiciona quebra a cada 2 itens)
                 if (i + 1) % 2 == 0 and (i + 1) < len(valid_matches):
                     embed.add_field(name='\u200b', value='\u200b', inline=False)
 

@@ -1,8 +1,10 @@
 class MatchMaker:
     """
     Responsável pela inteligência de cálculo de MMR e Balanceamento.
+    Lógica Híbrida: Base Elo + Nerf Flex + Velocity (Jogos baixos com WR alto = MMR Explosivo).
     """
 
+    # Base Score por Tier (Aproximação do MMR Visível)
     TIER_VALUES = {
         'IRON': 0,
         'BRONZE': 400,
@@ -26,40 +28,46 @@ class MatchMaker:
     }
 
     @staticmethod
-    def calculate_adjusted_mmr(tier: str, rank: str, lp: int, wins: int, losses: int) -> int:
+    def calculate_adjusted_mmr(tier: str, rank: str, lp: int, wins: int, losses: int, queue_type: str) -> int:
         """
-        Calcula o MMR Real baseado no algoritmo 'Marocos MMR':
-        BaseElo + (WinrateDiff * FatorConfiança)
+        Calcula o MMR Real.
+        Fórmula: ((Base + LP) * PesoFila) + (DiffWinrate * FatorIncerteza)
         """
-        # 1. Cálculo da Base (Elo Puro)
+        # 1. Base Score (Elo Visual Puro)
         tier_score = MatchMaker.TIER_VALUES.get(tier.upper(), 1000)
         rank_score = MatchMaker.RANK_VALUES.get(rank.upper(), 0)
         
-        # CORREÇÃO AQUI: Padronizei o nome da variável para 'base_score'
+        # Mestre+ usa LP direto. Outros elos somam ao teto da divisão.
         base_score = tier_score + rank_score + lp
 
-        # Se não tem jogos, retorna a base pura
+        # 2. Peso da Fila (Nerf na Flex mantido)
+        # Se for Flex, vale 85% do MMR de SoloQ na base
+        queue_multiplier = 0.85 if queue_type == 'RANKED_FLEX_SR' else 1.0
+        
         total_games = wins + losses
         if total_games == 0:
-            return base_score
+            return int(base_score * queue_multiplier)
 
-        # 2. Winrate Difference
+        # 3. Lógica de Velocity (O peso de ter menos partidas)
         winrate = (wins / total_games) * 100
-        wr_diff = winrate - 50  # Ex: 60% WR -> +10
+        wr_diff = winrate - 50  # Ex: 60% WR -> +10 pontos de diferença
 
-        # 3. Fator de Confiança (Smurf vs Hardstuck)
-        if total_games < 30:
-            k_factor = 15  # Smurf: WR impacta muito
+        # K-Factor: Escada de estabilidade detalhada
+        if total_games < 50:
+            k_factor = 20 # Smurf/Início: Impacto explosivo
         elif total_games < 100:
-            k_factor = 8   # Médio
+            k_factor = 12 # Subida Rápida
+        elif total_games < 150:
+            k_factor = 8  # Estabilizando
+        elif total_games < 200:
+            k_factor = 4  # Quase travado
         else:
-            k_factor = 4   # Hardstuck: WR impacta pouco
+            k_factor = 2  # Hardstuck (>200 jogos): Impacto mínimo do WR
 
-        # Bônus ou Penalidade
+        # Bônus ou Penalidade calculado
         bonus = wr_diff * k_factor
 
-        # CORREÇÃO AQUI: Agora a variável existe
-        final_mmr = int(base_score + bonus)
+        # Cálculo Final: Base ajustada pela fila + Bônus de desempenho
+        final_mmr = (base_score * queue_multiplier) + bonus
         
-        # Trava de segurança (Ninguém pode ter MMR negativo)
-        return max(0, final_mmr)
+        return int(max(0, final_mmr))
