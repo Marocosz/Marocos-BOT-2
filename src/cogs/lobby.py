@@ -7,6 +7,7 @@ from src.services.matchmaker import MatchMaker
 # --- COMPONENTE DE SELEÇÃO DE JOGADOR (PICK) ---
 class PlayerSelect(discord.ui.Select):
     def __init__(self, players, placeholder):
+        # Limita visualização para evitar erro de limite do discord
         options = [
             discord.SelectOption(label=p['name'], value=str(p['id']), description=f"MMR: {p['mmr']}")
             for p in players[:25]
@@ -16,7 +17,7 @@ class PlayerSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await self.view.process_pick(interaction, self.values[0])
 
-# --- VIEW DE SELEÇÃO DE CAPITÃO MANUAL (NOVO) ---
+# --- VIEW DE SELEÇÃO DE CAPITÃO MANUAL ---
 class ManualCaptainSelect(discord.ui.Select):
     def __init__(self, players, placeholder, is_first_cap=True):
         self.is_first_cap = is_first_cap
@@ -34,11 +35,10 @@ class ManualCaptainView(discord.ui.View):
         super().__init__(timeout=120)
         self.lobby_cog = lobby_cog
         self.players = players
-        self.admin_interaction = interaction # Guarda quem iniciou
+        self.admin_interaction = interaction 
         self.cap1 = None
-        
-        # Inicia pedindo o Capitão 1
         self.add_item(ManualCaptainSelect(players, "Selecione o Capitão 1 (Azul)", True))
+        self.add_cancel_button()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.admin_interaction.user.id:
@@ -48,21 +48,32 @@ class ManualCaptainView(discord.ui.View):
 
     async def process_selection(self, interaction, selected_id, is_first_cap):
         player = next((p for p in self.players if str(p['id']) == selected_id), None)
-        
         if is_first_cap:
             self.cap1 = player
-            # Remove o cap1 da lista para não ser escolhido de novo
             remaining = [p for p in self.players if p['id'] != player['id']]
-            
-            # Atualiza a View para pedir o Capitão 2
             self.clear_items()
             self.add_item(ManualCaptainSelect(remaining, "Selecione o Capitão 2 (Vermelho)", False))
-            
+            self.add_cancel_button()
             await interaction.response.edit_message(content=f"✅ Capitão 1 definido: **{player['name']}**. Escolha o segundo:", view=self)
         else:
             cap2 = player
-            # Inicia o fluxo normal de Coinflip
-            await self.lobby_cog.start_coinflip_phase(interaction, self.players, self.cap1, cap2)
+            # LIMPEZA: Remove botões
+            await interaction.response.edit_message(content=f"✅ Capitães definidos: **{self.cap1['name']}** vs **{cap2['name']}**", view=None)
+            await self.lobby_cog.start_coinflip_phase(self.admin_interaction, self.players, self.cap1, cap2)
+
+    def add_cancel_button(self):
+        btn = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.danger, row=2, emoji="✖️")
+        btn.callback = self.cancel_callback
+        self.add_item(btn)
+
+    async def cancel_callback(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("⛔ Apenas Admins.", ephemeral=True)
+        
+        self.lobby_cog.queue = []
+        await self.lobby_cog.update_lobby_message()
+        await interaction.response.edit_message(content="❌ Seleção Cancelada.", view=None)
+        self.stop()
 
 # --- VIEW 3: O DRAFT ---
 class DraftView(discord.ui.View):
@@ -90,8 +101,9 @@ class DraftView(discord.ui.View):
 
     async def cancel_callback(self, interaction: discord.Interaction):
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("⛔ Apenas Admins.", ephemeral=True)
+            await interaction.response.send_message("⛔ Apenas Administradores podem cancelar o draft!", ephemeral=True)
             return
+
         embed = discord.Embed(title="❌ Draft Cancelado", description=f"Cancelado por {interaction.user.mention}.", color=0xff0000)
         await interaction.response.edit_message(embed=embed, view=None)
         self.stop()
@@ -126,6 +138,7 @@ class DraftView(discord.ui.View):
             await interaction.response.edit_message(embed=self.get_embed(), view=self)
 
     async def finish_draft(self, interaction: discord.Interaction):
+        # Filtra bots de teste (ID < 0)
         real_blue = [p for p in self.team_blue if p['id'] > 0]
         real_red = [p for p in self.team_red if p['id'] > 0]
 
@@ -136,6 +149,7 @@ class DraftView(discord.ui.View):
         )
         
         embed = discord.Embed(title=f"⚔️ PARTIDA #{match_id} (Draft Finalizado)", color=0x2ecc71)
+        
         def fmt(team):
             if not team: return "Vazio"
             avg = sum(p['mmr'] for p in team) // len(team)
@@ -147,6 +161,7 @@ class DraftView(discord.ui.View):
         embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
         embed.add_field(name="📢 Instruções", value=f"Resultado: `.resultado {match_id} Blue/Red`", inline=False)
         
+        # LIMPEZA
         await interaction.response.edit_message(embed=embed, view=None)
         self.stop()
 
@@ -172,14 +187,19 @@ class SideSelectView(discord.ui.View):
         self.pool = pool
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.cap_secondary['id'] or interaction.user.guild_permissions.administrator or self.cap_secondary['id'] < 0:
-            return True
-        await interaction.response.send_message(f"✋ Apenas {self.cap_secondary['name']} pode escolher o lado!", ephemeral=True)
-        return False
+        if interaction.user.guild_permissions.administrator: pass 
+        elif interaction.user.id != self.cap_secondary['id'] and self.cap_secondary['id'] > 0:
+            await interaction.response.send_message(f"✋ Apenas {self.cap_secondary['name']} pode escolher o lado!", ephemeral=True)
+            return False
+        return True
 
     async def start_draft_phase(self, interaction, cap_blue, cap_red, first_pick_side):
+        # LIMPEZA: Remove os botões de escolha de lado
+        try: await interaction.message.edit(view=None)
+        except: pass
+        
         view = DraftView(self.lobby_cog, interaction.guild.id, cap_blue, cap_red, self.pool, first_pick_side)
-        await interaction.response.edit_message(embed=view.get_embed(), view=view)
+        await interaction.response.send_message(embed=view.get_embed(), view=view)
 
     @discord.ui.button(label="Quero Lado Azul", style=discord.ButtonStyle.primary, emoji="🔵")
     async def blue_side(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -188,6 +208,17 @@ class SideSelectView(discord.ui.View):
     @discord.ui.button(label="Quero Lado Vermelho", style=discord.ButtonStyle.danger, emoji="🔴")
     async def red_side(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.start_draft_phase(interaction, cap_blue=self.cap_priority, cap_red=self.cap_secondary, first_pick_side='BLUE')
+
+    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.danger, emoji="✖️", row=2)
+    async def cancel_side(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("⛔ Apenas Admins.", ephemeral=True)
+        
+        self.lobby_cog.queue = []
+        await self.lobby_cog.update_lobby_message()
+        # LIMPEZA
+        await interaction.response.edit_message(content="❌ Processo cancelado.", embed=None, view=None)
+        self.stop()
 
 # --- VIEW NOVO: ESCOLHA DE LADO (BALANCEADO) ---
 class BalancedSideSelectView(discord.ui.View):
@@ -201,12 +232,17 @@ class BalancedSideSelectView(discord.ui.View):
         self.losing_team = losing_team
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.winning_cap['id'] or interaction.user.guild_permissions.administrator or self.winning_cap['id'] < 0:
-            return True
-        await interaction.response.send_message(f"✋ Apenas {self.winning_cap['name']} pode escolher o lado!", ephemeral=True)
-        return False
+        if interaction.user.guild_permissions.administrator: pass
+        elif interaction.user.id != self.winning_cap['id'] and self.winning_cap['id'] > 0:
+            await interaction.response.send_message(f"✋ Apenas {self.winning_cap['name']} pode escolher o lado!", ephemeral=True)
+            return False
+        return True
 
     async def finalize_match(self, interaction, blue_team, red_team):
+        # LIMPEZA
+        try: await interaction.message.edit(view=None)
+        except: pass
+
         match_id = await MatchRepository.create_match(self.guild_id, blue_team, red_team)
         embed = discord.Embed(title=f"⚔️ PARTIDA #{match_id} (Balanceada)", color=0x2ecc71)
         def fmt(team):
@@ -221,7 +257,7 @@ class BalancedSideSelectView(discord.ui.View):
         embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
         embed.add_field(name="📢 Instruções", value=f"ID: **{match_id}**\n`.resultado {match_id} Blue/Red`", inline=False)
         
-        await interaction.response.edit_message(embed=embed, view=None)
+        await interaction.response.send_message(embed=embed)
         await self.lobby_cog.update_lobby_message()
 
     @discord.ui.button(label="Escolher BLUE", style=discord.ButtonStyle.primary, emoji="🔵")
@@ -232,16 +268,27 @@ class BalancedSideSelectView(discord.ui.View):
     async def choose_red(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.finalize_match(interaction, blue_team=self.losing_team, red_team=self.winning_team)
 
+    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.danger, emoji="✖️", row=2)
+    async def cancel_bal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("⛔ Apenas Admins.", ephemeral=True)
+        
+        self.lobby_cog.queue = []
+        await self.lobby_cog.update_lobby_message()
+        await interaction.response.edit_message(content="❌ Criação cancelada.", embed=None, view=None)
+        self.stop()
+
 # --- VIEW 1: LOBBY ---
 class LobbyView(discord.ui.View):
     def __init__(self, lobby_cog, disabled=False):
         super().__init__(timeout=None) 
         self.lobby_cog = lobby_cog
         if disabled:
-            self.join_button.disabled = True
-            self.leave_button.disabled = True
-            self.join_button.style = discord.ButtonStyle.secondary
-            self.leave_button.style = discord.ButtonStyle.secondary
+            # Se travado, removemos os botões da lista (melhor que disable)
+            # Ou desabilitamos. O usuário pediu para "sumir".
+            # Para sumir, a gente simplesmente não adiciona nada no init ou limpa.
+            self.clear_items()
+            return
 
     @discord.ui.button(label="Entrar", style=discord.ButtonStyle.success, emoji="⚔️", custom_id="lobby_join")
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -255,7 +302,16 @@ class LobbyView(discord.ui.View):
     async def profile_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Use `.perfil` para ver seus stats.", ephemeral=True)
 
-# --- VIEW 2: MODO SELECT (ATUALIZADO COM MANUAL) ---
+    @discord.ui.button(label="Resetar Fila (Admin)", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="lobby_reset", row=1)
+    async def reset_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("⛔ Apenas Administradores podem resetar a fila.", ephemeral=True)
+        
+        self.lobby_cog.queue = []
+        await self.lobby_cog.update_lobby_message()
+        await interaction.response.send_message("✅ Fila resetada.", ephemeral=True)
+
+# --- VIEW 2: MODO SELECT ---
 class ModeSelectView(discord.ui.View):
     def __init__(self, lobby_cog, players):
         super().__init__(timeout=None)
@@ -267,30 +323,46 @@ class ModeSelectView(discord.ui.View):
             return True
         await interaction.response.send_message("⛔ Apenas Administradores podem iniciar.", ephemeral=True)
         return False
+    
+    async def cleanup(self, interaction):
+        # LIMPEZA: Remove os botões de seleção de modo
+        try: await interaction.message.edit(view=None)
+        except: pass
 
     @discord.ui.button(label="Auto-Balanceado", style=discord.ButtonStyle.primary, emoji="⚖️")
     async def auto_balance(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
+        await self.cleanup(interaction)
         await self.lobby_cog.start_match_balanced(interaction, self.players)
         self.stop()
 
     @discord.ui.button(label="Capitães (Top Elo)", style=discord.ButtonStyle.secondary, emoji="👑")
     async def captains_mmr(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        await self.lobby_cog.setup_captains_auto(interaction, self.players, mode="mmr")
+        await self.cleanup(interaction)
+        await self.lobby_cog.setup_captains_phase(interaction, self.players, mode="mmr")
         self.stop()
 
     @discord.ui.button(label="Capitães (Aleatório)", style=discord.ButtonStyle.secondary, emoji="🎲")
     async def captains_random(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        await self.lobby_cog.setup_captains_auto(interaction, self.players, mode="random")
+        await self.cleanup(interaction)
+        await self.lobby_cog.setup_captains_phase(interaction, self.players, mode="random")
         self.stop()
 
-    # --- NOVO BOTÃO ---
     @discord.ui.button(label="Capitães (Manual)", style=discord.ButtonStyle.secondary, emoji="👮")
     async def captains_manual(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Não deferimos aqui porque a view de seleção manual é efemera/especial
+        # Para manual, não limpamos ainda pois é uma view efemera
         await self.lobby_cog.setup_captains_manual(interaction, self.players)
+        await self.cleanup(interaction)
+        self.stop()
+
+    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.danger, emoji="✖️", row=2)
+    async def cancel_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.lobby_cog.queue = []
+        await self.lobby_cog.update_lobby_message()
+        await self.cleanup(interaction)
+        await interaction.followup.send("❌ Setup cancelado.")
         self.stop()
 
 # --- LOBBY COG ---
@@ -299,14 +371,14 @@ class Lobby(commands.Cog):
         self.bot = bot
         self.queue = [] 
         self.lobby_message: discord.Message = None
-        self.QUEUE_LIMIT = 1 # Configurado para 1 para teste
+        self.QUEUE_LIMIT = 1 # DEBUG MODE (MUDE PARA 10)
 
     def get_queue_embed(self, locked=False):
         count = len(self.queue)
         if locked:
             color = 0x000000 
             title = "🔒 LOBBY FECHADO"
-            desc = "Aguarde o Admin configurar a partida."
+            desc = "Aguarde o Admin configurar a partida..."
         else:
             color = 0x3498db
             title = f"🏆 Lobby Liga Interna ({count}/{self.QUEUE_LIMIT})"
@@ -320,7 +392,14 @@ class Lobby(commands.Cog):
 
     async def update_lobby_message(self, interaction: discord.Interaction = None, locked=False):
         embed = self.get_queue_embed(locked=locked)
-        view = LobbyView(self, disabled=locked)
+        # Se locked=True, LobbyView(disabled=True) vai limpar os items, fazendo os botões sumirem
+        view = LobbyView(self, disabled=locked) 
+        
+        # Se locked, queremos view=None para garantir que suma? 
+        # Não, pois LobbyView limpo é melhor se quisermos reativar depois, 
+        # mas view=None garante sumiço visual total.
+        if locked: view = None 
+
         try:
             if interaction and not interaction.response.is_done():
                 await interaction.response.edit_message(embed=embed, view=view)
@@ -361,80 +440,66 @@ class Lobby(commands.Cog):
 
     # --- OPÇÃO A: AUTOMÁTICO ---
     async def start_match_balanced(self, interaction, players):
+        # DEBUG FILL
+        if len(players) < 10:
+            for i in range(10 - len(players)):
+                players.append({'id': -1*(i+500), 'name': f'Bot Bal {i}', 'mmr': 1000, 'main_lane': 'FILL'})
+
         team_blue, team_red = MatchMaker.balance_teams(players)
         
-        # Define Capitães (Top MMR) para o sorteio
         if team_blue: cap_blue = max(team_blue, key=lambda x: x['mmr'])
-        else: cap_blue = {'id': -1, 'name': 'Bot Blue', 'mmr': 1000}
-        
+        else: cap_blue = {'id': -1, 'name': 'Bot', 'mmr': 1000}
         if team_red: cap_red = max(team_red, key=lambda x: x['mmr'])
-        else: cap_red = {'id': -2, 'name': 'Bot Red', 'mmr': 1000}
+        else: cap_red = {'id': -2, 'name': 'Bot', 'mmr': 1000}
 
-        # Sorteio de Lado (Balanced)
-        if random.choice([True, False]):
-            win, lose = cap_blue, cap_red
-            win_team, lose_team = team_blue, team_red
-        else:
-            win, lose = cap_red, cap_blue
-            win_team, lose_team = team_red, team_blue
+        if random.choice([True, False]): win, lose, w_team, l_team = cap_blue, cap_red, team_blue, team_red
+        else: win, lose, w_team, l_team = cap_red, cap_blue, team_red, team_blue
 
         embed = discord.Embed(title="⚖️ Times Balanceados! (Sorteio)", color=0xff9900)
         embed.description = f"**{win['name']}** venceu o cara-ou-coroa e escolhe o **LADO**."
-        view = BalancedSideSelectView(self, interaction.guild.id, win, win_team, lose, lose_team)
+        view = BalancedSideSelectView(self, interaction.guild.id, win, w_team, lose, l_team)
         await interaction.followup.send(embed=embed, view=view)
 
-    # --- OPÇÃO B: CAPITÃES (AUTO/RANDOM) ---
-    async def setup_captains_auto(self, interaction, players, mode="mmr"):
-        # Debug: Cria bots se faltar gente
-        if len(players) < 10: 
-            cap1 = players[0]
-            cap2 = players[0] if len(players) == 1 else players[1]
-            pool = players[2:] if len(players) > 2 else []
-            for i in range(8 - len(pool)):
-                pool.append({'id': -1 * (i+100), 'name': f'Bot {i+1}', 'mmr': 1000, 'main_lane': 'FILL'})
+    # --- OPÇÃO B: FASE CAPITÃES ---
+    async def setup_captains_phase(self, interaction, players, mode="mmr"):
+        # DEBUG FILL
+        all_participants = players.copy()
+        if len(all_participants) < 10: 
+            for i in range(10 - len(all_participants)):
+                all_participants.append({'id': -1 * (i+100), 'name': f'Bot Teste {i+1}', 'mmr': 1000 + (i*10), 'main_lane': 'FILL'})
+
+        if mode == "mmr":
+            sorted_p = sorted(all_participants, key=lambda x: x['mmr'], reverse=True)
+            cap1, cap2 = sorted_p[0], sorted_p[1]
         else:
-            if mode == "mmr":
-                sorted_p = sorted(players, key=lambda x: x['mmr'], reverse=True)
-                cap1, cap2, pool = sorted_p[0], sorted_p[1], sorted_p[2:]
-            else:
-                random.shuffle(players)
-                cap1, cap2, pool = players[0], players[1], players[2:]
+            random.shuffle(all_participants)
+            cap1, cap2 = all_participants[0], all_participants[1]
 
-        await self.start_coinflip_phase(interaction, players, cap1, cap2)
+        await self.start_coinflip_phase(interaction, all_participants, cap1, cap2)
 
-    # --- OPÇÃO C: CAPITÃES (MANUAL) ---
+    # --- OPÇÃO C: CAPITÃES MANUAL ---
     async def setup_captains_manual(self, interaction, players):
-        # Debug Bots para teste manual
+        # DEBUG FILL
         if len(players) < 10:
-            for i in range(10 - len(players)):
-                players.append({'id': -1 * (i+100), 'name': f'Bot {i+1}', 'mmr': 1000})
-        
+            for i in range(10 - len(players)): players.append({'id': -1*(i+100), 'name': f'Bot {i+1}', 'mmr': 1000})
         view = ManualCaptainView(self, players, interaction)
         await interaction.response.send_message("Selecione os capitães abaixo:", view=view, ephemeral=True)
 
-    # --- FASE COMUM: MOEDA GIRADA ---
+    # --- FASE COMUM ---
     async def start_coinflip_phase(self, interaction, all_players, cap1, cap2):
-        # Reconstrói a pool removendo os capitães (importante para o manual)
         pool = [p for p in all_players if p['id'] != cap1['id'] and p['id'] != cap2['id']]
-
-        if random.choice([True, False]):
-            cap_priority, cap_secondary = cap1, cap2
-        else:
-            cap_priority, cap_secondary = cap2, cap1
+        if random.choice([True, False]): cap_priority, cap_secondary = cap1, cap2
+        else: cap_priority, cap_secondary = cap2, cap1
 
         embed = discord.Embed(title="🪙 Moeda Girada!", color=0xff9900)
-        embed.description = (
-            f"**{cap_priority['name']}** prioridade de Pick.\n"
-            f"**{cap_secondary['name']}** escolhe o **Lado**."
-        )
-        view = SideSelectView(self, cap_priority, cap_secondary, pool)
+        embed.description = f"**{cap_priority['name']}** prioridade de Pick.\n**{cap_secondary['name']}** escolhe o **Lado**."
+        embed.set_footer(text=f"Aguardando {cap_secondary['name']} escolher o lado...")
         
-        # Se a interação já foi respondida (caso do manual), usa followup
+        view = SideSelectView(self, cap_priority, cap_secondary, pool)
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, view=view)
         else:
             await interaction.followup.send(embed=embed, view=view)
-            
         await self.update_lobby_message()
 
     # --- COMANDOS ---
@@ -448,24 +513,16 @@ class Lobby(commands.Cog):
         self.lobby_message = await ctx.send(embed=embed, view=view)
 
     @commands.command(name="resetar")
-    async def resetar(self, ctx):
-        if not ctx.author.guild_permissions.administrator:
-            return await ctx.reply("⛔ Apenas Administradores.")
-        self.queue = []
-        await self.update_lobby_message()
-        await ctx.message.add_reaction("✅")
+    async def resetar(self, ctx): pass
 
     @commands.command(name="resultado")
     async def resultado(self, ctx, match_id: int = None, winner: str = None):
-        if not ctx.author.guild_permissions.administrator:
-            return await ctx.reply("⛔ Apenas Administradores.")
+        if not ctx.author.guild_permissions.administrator: return await ctx.reply("⛔ Apenas Administradores.")
         if not match_id or not winner: return await ctx.reply("❌ Uso: `.resultado <ID> <Blue/Red>`")
-        
         winner = winner.upper()
         if winner not in ['BLUE', 'RED', 'AZUL', 'VERMELHO']: return await ctx.reply("❌ Inválido.")
         if winner == 'AZUL': winner = 'BLUE'
         if winner == 'VERMELHO': winner = 'RED'
-
         status = await MatchRepository.finish_match(match_id, winner)
         if status == "SUCCESS":
             embed = discord.Embed(title=f"✅ Partida #{match_id} Finalizada!", description=f"Vencedor: **TIME {winner}**", color=0x2ecc71)
@@ -475,10 +532,8 @@ class Lobby(commands.Cog):
 
     @commands.command(name="anular")
     async def anular(self, ctx, match_id: int = None):
-        if not ctx.author.guild_permissions.administrator:
-            return await ctx.reply("⛔ Apenas Administradores.")
+        if not ctx.author.guild_permissions.administrator: return await ctx.reply("⛔ Apenas Administradores.")
         if not match_id: return await ctx.reply("❌ Uso: `.anular <ID>`")
-
         status = await MatchRepository.cancel_match(match_id)
         if status == "SUCCESS": await ctx.reply(f"🚫 Partida **#{match_id}** ANULADA.")
         elif status == "NOT_ACTIVE": await ctx.reply(f"❌ Partida não ativa.")

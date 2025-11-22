@@ -12,7 +12,7 @@ class HelpSelect(discord.ui.Select):
             ),
             discord.SelectOption(
                 label="Comandos de Jogador", 
-                description="Registro, Ranking, Perfil, Histórico.", 
+                description="Registro, Perfil, Histórico, MMR.", 
                 emoji="👤", value="player"
             ),
             discord.SelectOption(
@@ -45,7 +45,7 @@ class HelpSelect(discord.ui.Select):
                 "baseado no seu desempenho e fornecer ferramentas para sua evolução."
             )
             
-            embed.add_field(name="\u200b", value="\u200b", inline=False) # Espaçador
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
             
             embed.add_field(
                 name="⚡ Primeiros Passos",
@@ -87,16 +87,13 @@ class HelpSelect(discord.ui.Select):
                 ),
                 inline=True
             )
-
+            
             embed.add_field(
                 name="🏆 `.ranking`",
-                value=(
-                    "Exibe o **Top 10 Jogadores** da Liga Interna.\n"
-                    "Classificação baseada em: Vitórias > Derrotas > MMR."
-                ),
+                value="Exibe o **Top 10 Jogadores** da Liga Interna (Vitórias > Derrotas > MMR).",
                 inline=True
             )
-            
+
             embed.add_field(name="\u200b", value="\u200b", inline=False)
             
             embed.add_field(
@@ -198,17 +195,7 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             embed.add_field(
-                name="3️⃣ Critérios de Capitão",
-                value=(
-                    "Se o modo Capitães for escolhido, o sistema pode definir os líderes por **Top Elo** (maiores MMRs) ou **Aleatório**."
-                ),
-                inline=False
-            )
-
-            embed.add_field(name="\u200b", value="\u200b", inline=False)
-
-            embed.add_field(
-                name="4️⃣ A Mecânica do Coinflip (Moeda)",
+                name="3️⃣ A Mecânica do Coinflip (Moeda)",
                 value=(
                     "Para ser justo, o bot sorteia uma moeda entre os capitães:\n"
                     "🔹 **Vencedor da Moeda:** Ganha o **First Pick** (Escolhe o 1º jogador da lista).\n"
@@ -220,10 +207,11 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             embed.add_field(
-                name="5️⃣ Finalização",
+                name="4️⃣ O Draft e Jogo",
                 value=(
-                    "• O Bot gera um **ID da Partida** (ex: #50) e anuncia os times.\n"
-                    "• Jogadores criam a sala personalizada no LoL.\n"
+                    "• O Capitão da vez escolhe no **Menu Suspenso**.\n"
+                    "• Ao final, o Bot gera um **ID da Partida** (ex: #50).\n"
+                    "• Vocês criam a sala personalizada no LoL.\n"
                     "• Ao fim, o Admin usa `.resultado 50 Blue` (ou Red) para computar os pontos."
                 ),
                 inline=False
@@ -239,7 +227,7 @@ class HelpSelect(discord.ui.Select):
                 name="🔹 Gestão de Fila",
                 value=(
                     "• **`.fila`**: Cria o painel visual no canal.\n"
-                    "• **`.resetar`**: Limpa a lista de jogadores e destrava o lobby (caso bugue)."
+                    "• **Resetar**: Use o botão vermelho 🗑️ no próprio painel da fila para limpar a lista."
                 ),
                 inline=False
             )

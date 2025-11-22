@@ -1,8 +1,33 @@
 from sqlalchemy import select, desc
-from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide
+from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide, GuildConfig
 from src.database.config import get_session
 from datetime import datetime
 
+# --- REPOSITÓRIO DA GUILDA (CONFIGURAÇÕES) ---
+class GuildRepository:
+    @staticmethod
+    async def set_tracking_channel(guild_id: int, channel_id: int):
+        async with get_session() as session:
+            async with session.begin():
+                stmt = select(GuildConfig).where(GuildConfig.guild_id == guild_id)
+                result = await session.execute(stmt)
+                config = result.scalar_one_or_none()
+                
+                if config:
+                    config.tracking_channel_id = channel_id
+                else:
+                    config = GuildConfig(guild_id=guild_id, tracking_channel_id=channel_id)
+                    session.add(config)
+
+    @staticmethod
+    async def get_tracking_channel(guild_id: int):
+        async with get_session() as session:
+            stmt = select(GuildConfig).where(GuildConfig.guild_id == guild_id)
+            result = await session.execute(stmt)
+            config = result.scalar_one_or_none()
+            return config.tracking_channel_id if config else None
+
+# --- REPOSITÓRIO DE JOGADORES ---
 class PlayerRepository:
     
     @staticmethod
@@ -10,6 +35,14 @@ class PlayerRepository:
         async with get_session() as session: 
             result = await session.execute(select(Player).where(Player.discord_id == discord_id))
             return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_all_players_with_puuid():
+        """Busca todos os jogadores registrados para o Tracking"""
+        async with get_session() as session:
+            stmt = select(Player).where(Player.riot_puuid.isnot(None))
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
     @staticmethod
     async def upsert_player(discord_id: int, riot_data: dict, lane_main: str = None, lane_sec: str = None):
@@ -37,7 +70,7 @@ class PlayerRepository:
                 return player
 
     @staticmethod
-    async def update_riot_rank(discord_id: int, tier: str, rank: str, lp: int, wins: int, losses: int, calculated_mmr: int):
+    async def update_riot_rank(discord_id: int, tier: str, rank: str, lp: int, wins: int=0, losses: int=0, calculated_mmr: int=None):
         async with get_session() as session:
             async with session.begin():
                 result = await session.execute(select(Player).where(Player.discord_id == discord_id))
@@ -46,9 +79,9 @@ class PlayerRepository:
                     player.solo_tier = tier
                     player.solo_rank = rank
                     player.solo_lp = lp
-                    player.solo_wins = wins
-                    player.solo_losses = losses
-                    player.mmr = calculated_mmr  
+                    if wins > 0: player.solo_wins = wins
+                    if losses > 0: player.solo_losses = losses
+                    if calculated_mmr: player.mmr = calculated_mmr
                     player.last_rank_update = datetime.utcnow()
 
     @staticmethod
@@ -59,6 +92,7 @@ class PlayerRepository:
             result = await session.execute(stmt)
             return result.scalars().all()
 
+# --- REPOSITÓRIO DE PARTIDAS ---
 class MatchRepository:
     
     @staticmethod
@@ -116,10 +150,8 @@ class MatchRepository:
                             
                 return "SUCCESS"
 
-    # --- NOVO MÉTODO: CANCELAR PARTIDA ---
     @staticmethod
     async def cancel_match(match_id: int):
-        """Anula a partida (Status Cancelled). Ninguém ganha pontos."""
         async with get_session() as session:
             async with session.begin():
                 stmt = select(Match).where(Match.id == match_id)

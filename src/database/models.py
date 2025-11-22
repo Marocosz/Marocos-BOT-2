@@ -33,6 +33,7 @@ class GuildConfig(Base):
     organizer_role_id = Column(BigInteger, nullable=True) # ID do cargo de Organizador
     match_channel_id = Column(BigInteger, nullable=True)  # Canal onde rolam os jogos
     ranking_channel_id = Column(BigInteger, nullable=True) # Canal de atualizações de ranking
+    tracking_channel_id = Column(BigInteger, nullable=True) # Novo: Canal de avisos de Elo
 
 class Player(Base):
     """Dados do Jogador (Discord + Riot + Stats Internos)"""
@@ -46,6 +47,14 @@ class Player(Base):
     riot_id_str = Column(String, nullable=True) # GameName
     riot_icon_id = Column(Integer, nullable=True)
     
+    # --- DADOS DE RANKING (Cache da Riot para cálculo de MMR e Tracking) ---
+    solo_tier = Column(String, default="UNRANKED")
+    solo_rank = Column(String, default="")
+    solo_lp = Column(Integer, default=0)
+    solo_wins = Column(Integer, default=0)
+    solo_losses = Column(Integer, default=0)
+    last_rank_update = Column(DateTime, default=datetime.utcnow)
+
     # Stats Internos (Liga Interna)
     wins = Column(Integer, default=0)
     losses = Column(Integer, default=0)
