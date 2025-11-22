@@ -3,6 +3,7 @@ import asyncio
 from discord.ext import commands
 from src.database.repositories import PlayerRepository
 from src.services.riot_api import RiotAPI
+from src.services.matchmaker import MatchMaker # <--- IMPORT NOVO
 
 class Ranking(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -19,21 +20,16 @@ class Ranking(commands.Cog):
         return emoji_map.get(tier, '⚫')
 
     def get_queue_name(self, queue_id: int):
-        # Nomes mais específicos e curtos para caber na coluna
         queues = {
-            420: "Solo/Duo", 
-            440: "Flex 5v5", 
-            450: "ARAM", 
-            490: "Quickplay", 
-            1700: "Arena", 
-            1900: "URF"
+            420: "Solo/Duo", 440: "Flex 5v5", 450: "ARAM", 
+            490: "Quickplay", 1700: "Arena", 1900: "URF"
         }
         return queues.get(queue_id, "Normal")
 
-    # --- COMANDO PERFIL (MANTIDO INTACTO) ---
+    # --- COMANDO PERFIL ---
     @commands.command(name="perfil")
     async def perfil(self, ctx, jogador: discord.Member = None):
-        """Exibe o cartão de jogador COMPLETO."""
+        """Exibe o cartão de jogador COMPLETO e Atualiza MMR."""
         async with ctx.typing():
             target_user = jogador or ctx.author
             
@@ -56,17 +52,52 @@ class Ranking(commands.Cog):
                 riot_ranks = await self.riot_service.get_rank_by_puuid(player.riot_puuid)
                 top_mastery = await self.riot_service.get_top_mastery(player.riot_puuid)
                 
+                # --- LÓGICA NOVA DE MMR ---
                 solo = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
-                flex = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
+                
                 if solo:
-                    await PlayerRepository.update_riot_rank(player.discord_id, solo['tier'], solo['rank'], solo['leaguePoints'])
+                    # 1. Calcula o MMR Real usando a classe MatchMaker
+                    new_mmr = MatchMaker.calculate_adjusted_mmr(
+                        tier=solo['tier'], 
+                        rank=solo['rank'], 
+                        lp=solo['leaguePoints'], 
+                        wins=solo['wins'], 
+                        losses=solo['losses']
+                    )
+                    
+                    # 2. Salva no Banco (Wins, Losses e MMR)
+                    await PlayerRepository.update_riot_rank(
+                        discord_id=player.discord_id, 
+                        tier=solo['tier'], 
+                        rank=solo['rank'], 
+                        lp=solo['leaguePoints'],
+                        wins=solo['wins'],
+                        losses=solo['losses'],
+                        calculated_mmr=new_mmr
+                    )
+                    
+                    # 3. Atualiza objeto local para exibir o valor novo imediatamente no card
+                    player.mmr = new_mmr
+                    player.solo_wins = solo['wins']
+                    player.solo_losses = solo['losses']
                 else:
-                    await PlayerRepository.update_riot_rank(player.discord_id, "UNRANKED", "", 0)
+                    # Se for Unranked, reseta para base (1000)
+                    await PlayerRepository.update_riot_rank(player.discord_id, "UNRANKED", "", 0, 0, 0, 1000)
+                    player.mmr = 1000
                     
             except Exception as e:
                 print(f"Erro API Riot: {e}")
 
-            embed = discord.Embed(color=0x2b2d31)
+            # --- DESIGN DO CARD (MANTIDO) ---
+            embed_color = 0x2b2d31 
+            solo = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
+            flex = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
+
+            if solo:
+                tier_colors = {'IRON': 0x564b49, 'BRONZE': 0x8c5133, 'SILVER': 0xc0c0c0, 'GOLD': 0xffd700, 'PLATINUM': 0x2ecc71, 'EMERALD': 0x009475, 'DIAMOND': 0x3498db, 'MASTER': 0x9b59b6, 'GRANDMASTER': 0xe74c3c, 'CHALLENGER': 0xf1c40f}
+                embed_color = tier_colors.get(solo['tier'], 0x2b2d31)
+
+            embed = discord.Embed(color=embed_color)
             riot_link = f"[{player.riot_name}](https://www.op.gg/summoners/br/{player.riot_name.replace('#', '-')})"
             embed.set_author(name=f"{target_user.display_name} • Nível {summoner_level}", icon_url=target_user.display_avatar.url)
             
@@ -81,9 +112,7 @@ class Ranking(commands.Cog):
             def format_rank_detailed(data):
                 if not data: return "```st\nUnranked\n```"
                 wins = data['wins']; losses = data['losses']; total = wins+losses; wr = (wins/total*100) if total>0 else 0
-                return (f"{self.get_tier_emoji(data['tier'])} **{data['tier']} {data['rank']}**\n"
-                        f"Info: `{data['leaguePoints']} PDL` • `{wr:.0f}% WR`\n"
-                        f"Score: `{wins}V` - `{losses}D`")
+                return f"{self.get_tier_emoji(data['tier'])} **{data['tier']} {data['rank']}**\nInfo: `{data['leaguePoints']} PDL` • `{wr:.0f}% WR`\nScore: `{wins}V` - `{losses}D`"
 
             embed.add_field(name="🛡️ Solo/Duo", value=format_rank_detailed(solo), inline=True)
             embed.add_field(name="⚔️ Flex 5v5", value=format_rank_detailed(flex), inline=True)
@@ -100,6 +129,8 @@ class Ranking(commands.Cog):
 
             embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
             
+            # In-House Stats com MMR Atualizado
+            # Nota: Jogos/Vitorias In-House continuam 0 pois ainda não temos sistema de resultado de partida
             total_ih = player.wins + player.losses
             wr_ih = (player.wins / total_ih * 100) if total_ih > 0 else 0.0
             
@@ -109,7 +140,7 @@ class Ranking(commands.Cog):
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO HISTÓRICO (AJUSTADO: 2 COLUNAS REAIS + DETALHES) ---
+    # --- COMANDO HISTÓRICO (MANTIDO 10 JOGOS / COLUNAS) ---
     @commands.command(name="historico")
     async def historico(self, ctx, jogador: discord.Member = None):
         """Mostra as últimas 10 partidas em grade"""
@@ -131,8 +162,7 @@ class Ranking(commands.Cog):
 
             embed = discord.Embed(title=f"📜 Histórico (Últimas 10) - {player.riot_name}", color=0x3498db)
             
-            # Contador para controlar a grade
-            valid_matches = [m for m in matches_data if m] # Filtra erros
+            valid_matches = [m for m in matches_data if m] 
             
             for i, match in enumerate(valid_matches):
                 info = match['info']
@@ -144,31 +174,22 @@ class Ranking(commands.Cog):
                 kills = participant['kills']
                 deaths = participant['deaths']
                 assists = participant['assists']
-                
-                # Modo Específico (Solo/Duo, Flex, ARAM)
                 mode = self.get_queue_name(info['queueId'])
-                
                 ago = f"<t:{int(info['gameEndTimestamp']/1000)}:R>" 
-
                 icon = "🟦" if win else "🟥"
                 
-                # Adiciona o campo (inline=True permite ficar lado a lado)
                 embed.add_field(
                     name=f"{icon} {champ}",
                     value=f"**{kills}/{deaths}/{assists}**\n{mode}\n{ago}",
                     inline=True
                 )
 
-                # TRUQUE PARA FORÇAR 2 COLUNAS:
-                # Se o índice for ímpar (significa que já tem 2 itens na linha: 0 e 1),
-                # adicionamos um campo invisível que ocupa a linha inteira (inline=False),
-                # forçando a próxima entrada para a linha de baixo.
                 if (i + 1) % 2 == 0 and (i + 1) < len(valid_matches):
                     embed.add_field(name='\u200b', value='\u200b', inline=False)
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO LIVE (MANTIDO INTACTO) ---
+    # --- COMANDO LIVE (MANTIDO) ---
     @commands.command(name="live")
     async def live(self, ctx, jogador: discord.Member = None):
         """Verifica se o jogador está em partida agora"""
