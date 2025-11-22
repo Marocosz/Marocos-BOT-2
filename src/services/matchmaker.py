@@ -71,3 +71,29 @@ class MatchMaker:
         final_mmr = (base_score * queue_multiplier) + bonus
         
         return int(max(0, final_mmr))
+
+    # --- NOVA FUNÇÃO: BALANCEAMENTO DE TIMES ---
+    @staticmethod
+    def balance_teams(players: list):
+        """
+        Recebe uma lista de 10 dicionários {'id': ..., 'mmr': ..., 'name': ...}
+        Retorna (blue_team, red_team) balanceados por MMR.
+        """
+        # 1. Ordena do maior MMR para o menor
+        sorted_players = sorted(players, key=lambda x: x['mmr'], reverse=True)
+        
+        blue = []
+        red = []
+        
+        # 2. Distribuição "Snake" (A-B-B-A-A-B...)
+        # Isso garante que o 1º (Melhor) fique contra o 2º e 3º.
+        # Padrão de índices para o Blue: 0, 3, 4, 7, 8
+        # Padrão de índices para o Red:  1, 2, 5, 6, 9
+        
+        for i, p in enumerate(sorted_players):
+            if i in [0, 3, 4, 7, 8]:
+                blue.append(p)
+            else:
+                red.append(p)
+                
+        return blue, red
