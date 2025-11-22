@@ -46,7 +46,7 @@ class Player(Base):
     riot_id_str = Column(String, nullable=True) # GameName
     riot_icon_id = Column(Integer, nullable=True)
     
-    # Stats Internos (In-House)
+    # Stats Internos (Liga Interna)
     wins = Column(Integer, default=0)
     losses = Column(Integer, default=0)
     mmr = Column(Integer, default=1200) # Elo interno inicial

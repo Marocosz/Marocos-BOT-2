@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide
 from src.database.config import get_session
 from datetime import datetime
@@ -51,6 +51,14 @@ class PlayerRepository:
                     player.mmr = calculated_mmr  
                     player.last_rank_update = datetime.utcnow()
 
+    @staticmethod
+    async def get_internal_ranking(limit: int = None):
+        async with get_session() as session:
+            stmt = select(Player).order_by(desc(Player.wins), Player.losses, desc(Player.mmr))
+            if limit: stmt = stmt.limit(limit)
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
 class MatchRepository:
     
     @staticmethod
@@ -75,11 +83,6 @@ class MatchRepository:
 
     @staticmethod
     async def finish_match(match_id: int, winning_side: str):
-        """
-        Finaliza a partida.
-        IMPORTANTE: Apenas incrementa Wins/Losses internas. NÃO altera o MMR.
-        O MMR continua sendo o definido pelo Elo do LoL.
-        """
         side_enum = TeamSide.BLUE if winning_side.upper() == 'BLUE' else TeamSide.RED
         
         async with get_session() as session:
@@ -90,12 +93,12 @@ class MatchRepository:
 
                 if not match: return "NOT_FOUND"
                 if match.status == MatchStatus.FINISHED: return "ALREADY_FINISHED"
+                if match.status == MatchStatus.CANCELLED: return "ALREADY_CANCELLED"
 
                 match.status = MatchStatus.FINISHED
                 match.winning_side = side_enum
                 match.finished_at = datetime.utcnow()
 
-                # Atualiza estatísticas dos jogadores
                 stmt_players = select(MatchPlayer).where(MatchPlayer.match_id == match_id)
                 result_players = await session.execute(stmt_players)
                 match_players = result_players.scalars().all()
@@ -106,10 +109,26 @@ class MatchRepository:
                     player = p_result.scalar_one_or_none()
                     
                     if player:
-                        # Apenas conta +1 no placar interno
                         if mp.side == side_enum:
                             player.wins += 1 
                         else:
                             player.losses += 1
                             
+                return "SUCCESS"
+
+    # --- NOVO MÉTODO: CANCELAR PARTIDA ---
+    @staticmethod
+    async def cancel_match(match_id: int):
+        """Anula a partida (Status Cancelled). Ninguém ganha pontos."""
+        async with get_session() as session:
+            async with session.begin():
+                stmt = select(Match).where(Match.id == match_id)
+                result = await session.execute(stmt)
+                match = result.scalar_one_or_none()
+
+                if not match: return "NOT_FOUND"
+                if match.status != MatchStatus.IN_PROGRESS: return "NOT_ACTIVE"
+
+                match.status = MatchStatus.CANCELLED
+                match.finished_at = datetime.utcnow()
                 return "SUCCESS"

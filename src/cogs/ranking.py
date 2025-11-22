@@ -5,6 +5,71 @@ from src.database.repositories import PlayerRepository
 from src.services.riot_api import RiotAPI
 from src.services.matchmaker import MatchMaker
 
+# --- VIEW DE PAGINAÇÃO (NOVO) ---
+class RankingPaginationView(discord.ui.View):
+    def __init__(self, players, per_page=10):
+        super().__init__(timeout=120) # Botões expiram em 2 minutos
+        self.players = players
+        self.per_page = per_page
+        self.current_page = 0
+        # Calcula total de páginas
+        self.total_pages = max(1, (len(players) + per_page - 1) // per_page)
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_button.disabled = (self.current_page == 0)
+        self.next_button.disabled = (self.current_page == self.total_pages - 1)
+        self.counter_button.label = f"{self.current_page + 1}/{self.total_pages}"
+
+    def create_embed(self):
+        start = self.current_page * self.per_page
+        end = start + self.per_page
+        batch = self.players[start:end]
+
+        embed = discord.Embed(title="🏆 Ranking da Liga Interna", color=0xffd700)
+        embed.description = "Classificação por **Vitórias** > **Derrotas** > **MMR**."
+
+        lista_fmt = ""
+        for i, p in enumerate(batch):
+            # Calcula a posição real (ex: página 2 começa no 11)
+            rank_pos = start + i + 1
+            
+            if rank_pos == 1: icon = "🥇"
+            elif rank_pos == 2: icon = "🥈"
+            elif rank_pos == 3: icon = "🥉"
+            else: icon = f"`{rank_pos}.`"
+
+            total = p.wins + p.losses
+            wr = (p.wins / total * 100) if total > 0 else 0
+            
+            lista_fmt += (
+                f"{icon} **{p.riot_name}**\n"
+                f"└ `{p.wins}V` - `{p.losses}D` ({wr:.0f}%) • **{p.mmr}** MMR\n"
+            )
+        
+        if not batch:
+            lista_fmt = "Nenhum jogador nesta página."
+
+        embed.add_field(name="Jogadores", value=lista_fmt, inline=False)
+        return embed
+
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="1/1", style=discord.ButtonStyle.gray, disabled=True)
+    async def counter_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass 
+
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+
 class Ranking(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -31,7 +96,26 @@ class Ranking(commands.Cog):
         }
         return queues.get(queue_id, "Normal")
 
-    # --- COMANDO PERFIL (MANTIDO INTACTO) ---
+    # --- COMANDO 1: RANKING (ATUALIZADO COM PAGINAÇÃO) ---
+    @commands.command(name="ranking", aliases=["top", "leaderboard"])
+    async def ranking(self, ctx):
+        """Mostra TODOS os jogadores da Liga Interna (Paginado)"""
+        # Busca sem limite (limit=None) para pegar todo mundo
+        players = await PlayerRepository.get_internal_ranking(limit=None)
+        
+        if not players:
+            embed = discord.Embed(title="🏆 Ranking da Liga Interna", color=0x3498db)
+            embed.description = "Nenhuma partida foi jogada ainda ou ninguém pontuou."
+            await ctx.reply(embed=embed)
+            return
+
+        # Cria a View de Paginação
+        view = RankingPaginationView(players, per_page=10)
+        
+        # Envia a primeira página
+        await ctx.reply(embed=view.create_embed(), view=view)
+
+    # --- COMANDO 2: PERFIL (MANTIDO INTACTO) ---
     @commands.command(name="perfil")
     async def perfil(self, ctx, jogador: discord.Member = None):
         """Exibe o cartão de jogador COMPLETO e Atualiza MMR."""
@@ -100,7 +184,7 @@ class Ranking(commands.Cog):
             except Exception as e:
                 print(f"Erro API Riot: {e}")
 
-            # --- DESIGN DO CARD (MANTIDO ORIGINAL) ---
+            # --- DESIGN DO CARD ---
             embed_color = 0x2b2d31 
             solo = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
             flex = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
@@ -160,13 +244,21 @@ class Ranking(commands.Cog):
             total_ih = player.wins + player.losses
             wr_ih = (player.wins / total_ih * 100) if total_ih > 0 else 0.0
             
-            stats_block = (f"```yaml\nMMR:   {player.mmr}\nJogos: {total_ih}\nV/D:   {player.wins} - {player.losses}\nWin%:  {wr_ih:.1f}%\n```")
+            stats_block = (
+                f"```yaml\n"
+                f"MMR:   {player.mmr}\n"
+                f"Jogos: {total_ih}\n"
+                f"V/D:   {player.wins} - {player.losses}\n"
+                f"Win%:  {wr_ih:.1f}%\n"
+                f"```"
+            )
+            
             embed.add_field(name="🏆 Liga Interna", value=stats_block, inline=False)
             embed.set_footer(text=f"System ID: {player.discord_id}")
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO MMR (VISUAL ANALÍTICO DETALHADO) ---
+    # --- COMANDO 3: MMR (AUDITORIA DETALHADA) ---
     @commands.command(name="mmr")
     async def mmr(self, ctx, jogador: discord.Member = None):
         """Relatório detalhado da pontuação"""
@@ -174,63 +266,68 @@ class Ranking(commands.Cog):
         player = await PlayerRepository.get_player_by_discord_id(target_user.id)
         if not player: return await ctx.reply("❌ Jogador não registrado.")
 
-        # 1. Busca Dados Frescos
+        # Busca dados frescos
         riot_ranks = await self.riot_service.get_rank_by_puuid(player.riot_puuid)
         
+        # Prioriza SoloQ
         data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
-        source_name = "Solo/Duo"
         is_flex = False
         
+        # Fallback Flex
         if not data:
             data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
-            source_name = "Flex 5v5"
             is_flex = True
         
         if not data:
             await ctx.reply(f"🔍 **{player.riot_name}** é Unranked. MMR Base: 1000.")
             return
 
-        # 2. Recálculo para Exibição (Passo a Passo)
-        
-        # Passo A: Valor do Elo
+        # Recálculo para Exibição Passo a Passo
         tier_score = MatchMaker.TIER_VALUES.get(data['tier'], 1000)
         rank_score = MatchMaker.RANK_VALUES.get(data['rank'], 0)
         base_raw = tier_score + rank_score + data['leaguePoints']
         
-        # Passo B: Penalidade de Fila
         queue_mod = 0.85 if is_flex else 1.0
         base_adjusted = int(base_raw * queue_mod)
-        penalty_val = base_raw - base_adjusted # Quanto perdeu
+        penalty_val = base_raw - base_adjusted 
         
-        # Passo C: Desempenho (Winrate + Velocity)
         total_games = data['wins'] + data['losses']
         winrate = (data['wins'] / total_games * 100) if total_games > 0 else 0
         wr_diff = winrate - 50
         
-        # Define o Fator K (Incerteza)
-        if total_games < 50:   k_factor = 20; phase = "Calibração (Smurf?)"
-        elif total_games < 100: k_factor = 12; phase = "Subida Rápida"
-        elif total_games < 150: k_factor = 8;  phase = "Estabilizando"
-        elif total_games < 200: k_factor = 4;  phase = "Consolidação"
-        else:                   k_factor = 2;  phase = "Elo Definido"
+        # Escada de K-Factor (Velocity)
+        phase = "Veterano"
+        k_factor = 2
+        
+        if total_games < 50:   
+            k_factor = 20
+            phase = "Calibração (Smurf?)"
+        elif total_games < 100: 
+            k_factor = 12
+            phase = "Subida Rápida"
+        elif total_games < 150: 
+            k_factor = 8
+            phase = "Estabilizando"
+        elif total_games < 200: 
+            k_factor = 4
+            phase = "Consolidação"
+        else:                   
+            k_factor = 2
+            phase = "Elo Definido"
         
         bonus = int(wr_diff * k_factor)
-        
-        # Resultado Final
         final = int(base_adjusted + bonus)
         final = max(0, final)
 
-        # --- MONTAGEM DO EMBED ---
+        # Montagem do Embed
         embed = discord.Embed(title=f"🧮 Extrato de MMR: {player.riot_name}", color=0x2b2d31)
         
-        # 1. O Elo Bruto
         embed.add_field(
             name="1️⃣ Elo Oficial",
             value=f"**{data['tier']} {data['rank']}** ({data['leaguePoints']} PDL)\nValor Bruto: `{base_raw}` pontos",
             inline=True
         )
 
-        # 2. Ajuste da Fila (Visual diff para mostrar perda se houver)
         if is_flex:
             q_text = f"```diff\n- {penalty_val} pts (Nerf Flex 15%)\n```"
             q_desc = "Fila Flex tem peso reduzido."
@@ -239,28 +336,19 @@ class Ranking(commands.Cog):
             q_desc = "Fila Solo conta integralmente."
             
         embed.add_field(name="2️⃣ Ajuste de Fila", value=f"{q_text}{q_desc}", inline=True)
-
-        # Separador
+        
         embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
 
-        # 3. Análise de Desempenho
-        # Formata sinal de + ou -
         sinal = "+" if bonus >= 0 else ""
-        
         perf_explain = (
             f"**Jogos:** {total_games} ({phase})\n"
             f"**Winrate:** {winrate:.1f}% (Dif. da média: {wr_diff:.1f}%)\n"
             f"**Multiplicador:** {k_factor}x\n"
         )
         
-        # Caixa de código para o bônus ficar destacado
         bonus_block = f"```diff\n{sinal} {bonus} pts de Ajuste\n```"
-        
         embed.add_field(name="3️⃣ Desempenho (Velocity)", value=perf_explain + bonus_block, inline=False)
 
-        # 4. A FÓRMULA FINAL (O que você pediu)
-        # Mostra a matemática exata com os números do usuário
-        
         formula_visual = (
             f"```ini\n"
             f"[ Base Ajustada ]   [ Bônus WR ]     [ MMR FINAL ]\n"
@@ -269,13 +357,11 @@ class Ranking(commands.Cog):
         )
         
         embed.add_field(name="🏁 Fórmula Aplicada", value=formula_visual, inline=False)
-        
-        # Rodapé explicativo
         embed.set_footer(text=f"Cálculo: (Elo Base x Peso Fila) + ((Winrate - 50) x Fator Jogos)")
 
         await ctx.reply(embed=embed)
 
-    # --- COMANDO HISTÓRICO (MANTIDO 10 JOGOS / COLUNAS) ---
+    # --- COMANDO 4: HISTÓRICO (MANTIDO INTACTO) ---
     @commands.command(name="historico")
     async def historico(self, ctx, jogador: discord.Member = None):
         """Mostra as últimas 10 partidas em grade"""
@@ -327,7 +413,7 @@ class Ranking(commands.Cog):
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO LIVE (MANTIDO) ---
+    # --- COMANDO 5: LIVE (MANTIDO INTACTO) ---
     @commands.command(name="live")
     async def live(self, ctx, jogador: discord.Member = None):
         """Verifica se o jogador está em partida agora"""
