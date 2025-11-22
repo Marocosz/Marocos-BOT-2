@@ -309,7 +309,7 @@ class Lobby(commands.Cog):
             desc = "Aguarde o Admin configurar a partida."
         else:
             color = 0x3498db
-            title = f"🏆 Lobby In-House ({count}/{self.QUEUE_LIMIT})"
+            title = f"🏆 Lobby Liga Interna ({count}/{self.QUEUE_LIMIT})"
             if count == 0: desc = "A fila está vazia."
             else:
                 lines = [f"`{i+1}.` **{p['name']}** ({p['mmr']}) - {p.get('main_lane','?').title()}" for i, p in enumerate(self.queue)]
