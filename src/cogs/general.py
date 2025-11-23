@@ -87,7 +87,7 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             embed.add_field(
-                name="📝 `.registrar <Nick#TAG> <Lane1> [Lane2]`",
+                name="📝 `.registrar <Nick#TAG> <Lane1> <Lane2>`",
                 value=(
                     "Vincula sua conta Riot. Exige verificação de ícone para segurança.\n"
                     "**Ex:** `.registrar Faker#KR1 Mid` (Apenas main lane)\n"
@@ -316,7 +316,7 @@ class General(commands.Cog):
     async def ajuda(self, ctx):
         """Abre o painel de ajuda interativo"""
         embed = discord.Embed(
-            title="🤖 Central de Ajuda - Liga Interna",
+            title="🤖 Central de Ajuda - Marocos BOT",
             description="Selecione uma categoria no menu abaixo para acessar os tutoriais e lista de comandos.",
             color=0x2b2d31
         )
