@@ -104,16 +104,18 @@ class Auth(commands.Cog):
 
         # 1. Limpar o argumento principal imediatamente para remover caracteres invisíveis/Unicode
         cleaned_args = self.remove_invisible(args).strip()
-        parts = cleaned_args.split() # Agora o split deve ser limpo
+        parts = cleaned_args.split() 
 
+        # 2. VALIDAÇÃO CORRETA: Precisa de Nick#TAG E a Lane (mínimo de 2 partes)
         if len(parts) < 2:
+            # CORREÇÃO: Esta checagem agora é precisa, garantindo que a mensagem correta seja exibida.
             await ctx.reply("❌ Você precisa informar pelo menos Nick#TAG e a lane principal.")
             return
 
-        # 2. Identificar Main Lane (última parte)
+        # 3. Restante do Parsing (Agora que temos certeza de ter pelo menos 2 partes)
+
         main_lane_input = parts[-1]
         
-        # 3. Identificar Secondary Lane (se houver e for válida)
         sec_lane_input = None
         riot_id_parts = parts[:-1]
 
