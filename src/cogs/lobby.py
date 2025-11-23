@@ -3,6 +3,7 @@ import random
 from discord.ext import commands
 from src.database.repositories import PlayerRepository, MatchRepository
 from src.services.matchmaker import MatchMaker
+import asyncio
 
 # --- COMPONENTE DE SELEÇÃO DE JOGADOR (PICK) ---
 class PlayerSelect(discord.ui.Select):
@@ -159,12 +160,16 @@ class DraftView(discord.ui.View):
         embed.add_field(name=f"🔵 Time Azul (Cap. {self.cap_blue['name']})", value=fmt(self.team_blue), inline=True)
         embed.add_field(name=f"🔴 Time Vermelho (Cap. {self.cap_red['name']})", value=fmt(self.team_red), inline=True)
         embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
-        embed.add_field(name="📢 Instruções", value=f"Resultado: `.resultado {match_id} Blue/Red`", inline=False)
+        # ID DA PARTIDA EM DESTAQUE AQUI
+        embed.add_field(name="📢 Instruções", value=f"ID: **{match_id}**\n`.resultado {match_id} Blue/Red`", inline=False)
         
         # LIMPEZA
         await interaction.response.edit_message(embed=embed, view=None)
         self.stop()
-        await self.lobby_cog.reset_lobby_state() # Fila deve ser reaberta aqui
+        # MUDANÇA: Não chama reset_lobby_state, pois a partida NÃO FOI FINALIZADA OFICIALMENTE AINDA (.resultado que faz isso)
+        # Apenas limpamos o ID da partida
+        self.lobby_cog.current_match_id = 0 
+        await self.lobby_cog.update_lobby_message(locked=True) # Trava o painel principal, mas não o transforma na próxima fila.
 
     def get_embed(self):
         color = 0x3498db if self.turn == 'BLUE' else 0xe74c3c
@@ -265,10 +270,11 @@ class BalancedSideSelectView(discord.ui.View):
         embed.add_field(name=f"🔵 Time Azul (Cap. {cap_blue_name})", value=fmt(blue_team), inline=True)
         embed.add_field(name=f"🔴 Time Vermelho (Cap. {cap_red_name})", value=fmt(red_team), inline=True)
         embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+        # ID DA PARTIDA EM DESTAQUE AQUI
         embed.add_field(name="📢 Instruções", value=f"ID: **{match_id}**\n`.resultado {match_id} Blue/Red`", inline=False)
         
         await interaction.response.send_message(embed=embed)
-        await self.lobby_cog.reset_lobby_state()
+        await self.lobby_cog.reset_lobby_state(match_id) # NOVO: Passa o ID para que o reset_lobby_state possa finalizar o processo
 
     @discord.ui.button(label="Escolher BLUE", style=discord.ButtonStyle.primary, emoji="🔵")
     async def choose_blue(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -296,15 +302,11 @@ class LobbyView(discord.ui.View):
         # Se disabled for True, a view será enviada sem botões de interação da fila.
         if disabled:
             self.clear_items()
-            # Adicionamos apenas o botão de reset (para Admins)
-            reset_btn = discord.ui.Button(label="Resetar Fila (Admin)", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="lobby_reset", row=1)
-            reset_btn.callback = self.reset_button.callback # Associa o callback do método decorado
-            self.add_item(reset_btn)
+            # Nenhum botão é adicionado, garantindo que a View esteja vazia.
             return
 
         # NO MODO HABILITADO (disabled=False):
         # Os botões decorados são AUTOCARREGADOS. 
-        # Nenhuma chamada explícita a self.join_button(self) é necessária ou permitida.
         pass
 
     @discord.ui.button(label="Entrar", style=discord.ButtonStyle.success, emoji="⚔️", custom_id="lobby_join")
@@ -318,6 +320,16 @@ class LobbyView(discord.ui.View):
     @discord.ui.button(label="Perfil", style=discord.ButtonStyle.secondary, emoji="📊", custom_id="lobby_profile")
     async def profile_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Use `.perfil` para ver seus stats.", ephemeral=True)
+
+    # NOVO BOTÃO: Cancelar Fila (Admin)
+    @discord.ui.button(label="Cancelar Fila (Admin)", style=discord.ButtonStyle.danger, emoji="✖️", custom_id="lobby_cancel", row=1)
+    async def cancel_queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("⛔ Apenas Administradores podem cancelar a fila.", ephemeral=True)
+        
+        await self.lobby_cog.reset_lobby_state()
+        await interaction.response.send_message("❌ Fila cancelada e lobby reaberto.", ephemeral=True)
+
 
     # Note que o decorator abaixo define row=1, o que o autoloader usará no modo habilitado.
     @discord.ui.button(label="Resetar Fila (Admin)", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="lobby_reset", row=1)
@@ -394,35 +406,65 @@ class Lobby(commands.Cog):
         self.queue = [] 
         self.lobby_message: discord.Message = None
         
+        # VARIÁVEL PARA RASTREAR O PRÓXIMO ID DE PARTIDA (0 = Sem ID, 1 = Próxima é a #1)
+        self.current_match_id = 0 
+        
         # --- VARIÁVEIS DE DEBUG ---
-        self.DEBUG_QUEUE_LIMIT = 1 # Limite baixo para teste (mude para 10 na produção)
-        self.DEBUG_FILL_ENABLE = True # Ativar preenchimento de bots para teste
+        self.DEBUG_QUEUE_LIMIT = 1 
+        self.DEBUG_FILL_ENABLE = True 
         self.QUEUE_LIMIT = self.DEBUG_QUEUE_LIMIT 
         # -------------------------
+        
+        self.VOTE_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'] 
 
 
-    def get_queue_embed(self, locked=False):
+    def get_queue_embed(self, locked=False, finished_match_id: int = 0): # NOVO: finished_match_id para estado final
         count = len(self.queue)
-        limit = self.QUEUE_LIMIT # Usa a variável de limite
-
-        if locked:
-            color = 0x000000 
-            title = "🔒 LOBBY FECHADO"
-            desc = "Aguarde o Admin configurar a partida..."
-        else:
+        limit = self.QUEUE_LIMIT
+        
+        # 1. Definindo o rótulo do ID da Partida
+        if finished_match_id > 0:
+            match_ref = f" #{finished_match_id}"
+            title = f"❌ LOBBY ENCERRADO | Partida{match_ref}"
+            color = 0xe74c3c # Vermelho para encerrado
+            desc = f"A Partida{match_ref} foi finalizada/anulada. Use `.fila` para a próxima partida."
+        elif self.current_match_id > 0:
+            match_ref = f" #{self.current_match_id}"
+            if locked:
+                color = 0x000000 
+                title = f"🔒 LOBBY FECHADO{match_ref}"
+                desc = "Aguarde o Admin configurar a partida..."
+            else:
+                color = 0x3498db
+                title = f"🏆 Fila para Partida{match_ref} ({count}/{limit})"
+                if count == 0: desc = "A fila está vazia."
+                else:
+                    lines = [f"`{i+1}.` **{p['name']}** ({p['mmr']}) - {p.get('main_lane','?').title()}" for i, p in enumerate(self.queue)]
+                    desc = "\n".join(lines)
+        else: # ID 0 (antes de iniciar a primeira fila)
+            match_ref = " #Nº 1"
             color = 0x3498db
-            title = f"🏆 Lobby Liga Interna ({count}/{limit})"
+            title = f"🏆 Fila para Partida{match_ref} ({count}/{limit})"
             if count == 0: desc = "A fila está vazia."
             else:
                 lines = [f"`{i+1}.` **{p['name']}** ({p['mmr']}) - {p.get('main_lane','?').title()}" for i, p in enumerate(self.queue)]
                 desc = "\n".join(lines)
+
         embed = discord.Embed(title=title, description=desc, color=color)
-        if not locked: embed.set_footer(text="Clique para entrar • Requer registro (.registrar)")
+        
+        # Footer só aparece se não estiver ENCERRADO
+        if finished_match_id == 0:
+            embed.set_footer(text="Clique para entrar • Requer registro (.registrar)")
+            
         return embed
 
-    async def update_lobby_message(self, interaction: discord.Interaction = None, locked=False):
-        embed = self.get_queue_embed(locked=locked)
-        view = LobbyView(self, disabled=locked) 
+    async def update_lobby_message(self, interaction: discord.Interaction = None, locked=False, finished_match_id: int = 0): # NOVO: finished_match_id
+        embed = self.get_queue_embed(locked=locked, finished_match_id=finished_match_id)
+        
+        # A View é desabilitada se o lobby estiver ENCERADO (finished_match_id > 0) 
+        # OU se estiver FECHADO (locked=True).
+        view_disabled = (finished_match_id > 0) or locked
+        view = LobbyView(self, disabled=view_disabled) 
         
         try:
             if interaction and not interaction.response.is_done():
@@ -431,10 +473,21 @@ class Lobby(commands.Cog):
                 await self.lobby_message.edit(embed=embed, view=view)
         except: pass
 
-    async def reset_lobby_state(self):
-        """Reinicia o estado da fila e reabre a mensagem do lobby principal."""
+    async def reset_lobby_state(self, finished_match_id: int = 0):
+        """Reinicia o estado da fila e atualiza a mensagem principal."""
+        
+        # 1. Limpa a fila
         self.queue = []
-        await self.update_lobby_message()
+        
+        # 2. Se uma partida foi finalizada/anulada (ID > 0), imobilizamos o card atual
+        if finished_match_id > 0:
+            # Incrementamos o ID para a PRÓXIMA fila.
+            self.current_match_id = finished_match_id + 1
+            # Imobiliza o card atual para o estado "LOBBY ENCERRADO"
+            await self.update_lobby_message(finished_match_id=finished_match_id)
+        else:
+            # Se for cancelamento de setup (ou reset), apenas reabrimos a fila no ID atual.
+            await self.update_lobby_message()
 
     async def process_join(self, interaction: discord.Interaction):
         if len(self.queue) >= self.QUEUE_LIMIT:
@@ -463,7 +516,8 @@ class Lobby(commands.Cog):
         players_snapshot = self.queue.copy()
         
         player_names = ", ".join([f"**{p['name']}**" for p in players_snapshot])
-        embed = discord.Embed(title="⚡ Painel de Controle", description="O Lobby encheu! Escolha o modo:", color=0xffd700)
+        # NOVO: Inclui o ID da partida no Painel de Controle
+        embed = discord.Embed(title=f"⚡ Painel de Controle | Partida #{self.current_match_id}", description="O Lobby encheu! Escolha o modo:", color=0xffd700)
         embed.add_field(name="Jogadores", value=player_names, inline=False)
         view = ModeSelectView(self, players_snapshot)
         
@@ -557,12 +611,150 @@ class Lobby(commands.Cog):
         else:
             await interaction.response.send_message(embed=embed, view=view)
 
+    # --- NOVO MÉTODO 1: LÓGICA DE CRIAÇÃO E AGENDAMENTO DAS ENQUETES ---
+    async def _start_mvp_polls(self, channel: discord.TextChannel, match_id: int, winner_side: str, match_details: dict):
+        # 1. Separar Times e Cores
+        if winner_side == 'BLUE':
+            winning_team = match_details['blue_team']
+            losing_team = match_details['red_team']
+            winning_color = 0x3498db
+            losing_color = 0xe74c3c
+        else: # RED
+            winning_team = match_details['red_team']
+            losing_team = match_details['blue_team']
+            winning_color = 0xe74c3c
+            losing_color = 0x3498db
+
+        # Filtrar apenas jogadores reais para a votação
+        real_winning_team = [p for p in winning_team if p['id'] > 0]
+        real_losing_team = [p for p in losing_team if p['id'] > 0]
+        
+        # Se não houver jogadores reais suficientes, pula a votação
+        if not real_winning_team or not real_losing_team:
+            print(f"Enquete MVP/iMVP pulada para Partida #{match_id}: jogadores insuficientes.")
+            return
+
+        # 2. Enquete MVP (Time Vencedor)
+        mvp_desc = "**Vote no Jogador Mais Valioso (MVP)** do time vencedor:\n\n"
+        mvp_players_list = [f"{self.VOTE_EMOJIS[i]} {player['name']} ({player['mmr']})" for i, player in enumerate(real_winning_team)]
+        
+        mvp_embed = discord.Embed(
+            title=f"⭐ ENQUETE MVP | Partida #{match_id} (Time {winner_side})",
+            description=mvp_desc + "\n".join(mvp_players_list),
+            color=winning_color
+        )
+        mvp_embed.set_footer(text="A votação dura 30 minutos. Vote com a reação correspondente.")
+        mvp_message = await channel.send(content="||@here||", embed=mvp_embed)
+        
+        for i in range(len(real_winning_team)):
+            await mvp_message.add_reaction(self.VOTE_EMOJIS[i])
+
+        # 3. Enquete iMVP (Time Perdedor)
+        loser_side = 'BLUE' if winner_side == 'RED' else 'RED'
+        imvp_desc = "**Vote no Jogador Inverso (iMVP) do Time Perdedor** (aquele que mais dificultou para o próprio time):\n\n"
+        imvp_players_list = [f"{self.VOTE_EMOJIS[i]} {player['name']} ({player['mmr']})" for i, player in enumerate(real_losing_team)]
+                
+        imvp_embed = discord.Embed(
+            title=f"👎 ENQUETE iMVP | Partida #{match_id} (Time {loser_side})",
+            description=imvp_desc + "\n".join(imvp_players_list),
+            color=losing_color
+        )
+        imvp_embed.set_footer(text="A votação dura 30 minutos. Vote com a reação correspondente.")
+        imvp_message = await channel.send(embed=imvp_embed)
+        
+        for i in range(len(real_losing_team)):
+            await imvp_message.add_reaction(self.VOTE_EMOJIS[i])
+
+        # 4. Agendar a finalização da enquete
+        self.bot.loop.create_task(self._finalize_poll_after_delay(
+            channel, 
+            match_id, 
+            mvp_message.id, 
+            imvp_message.id,
+            real_winning_team, 
+            real_losing_team
+        ))
+
+    # --- NOVO MÉTODO 2: CÁLCULO DOS RESULTADOS ---
+    def _calculate_poll_result(self, message: discord.Message, team: list) -> str:
+        max_votes = -1
+        winner_names = "Ninguém votou!"
+        
+        for reaction in message.reactions:
+            try:
+                # Encontra o índice do emoji no array VOTE_EMOJIS
+                emoji_index = self.VOTE_EMOJIS.index(str(reaction.emoji))
+            except ValueError:
+                continue # Ignora emojis não relacionados à votação
+
+            # Garante que o índice é válido e corresponde a um jogador real
+            if emoji_index < len(team):
+                player_name = team[emoji_index]['name']
+                vote_count = reaction.count - 1 # Subtrai 1 (a reação do próprio bot)
+                
+                if vote_count > max_votes:
+                    max_votes = vote_count
+                    winner_names = f"**{player_name}** com {vote_count} voto(s)."
+                elif vote_count == max_votes and max_votes > 0:
+                    winner_names += f" e **{player_name}** (Empate)"
+
+        return winner_names if max_votes > 0 else "Ninguém votou!"
+
+    # --- NOVO MÉTODO 3: FINALIZAÇÃO AGENDADA ---
+    async def _finalize_poll_after_delay(self, channel: discord.TextChannel, match_id: int, mvp_msg_id: int, imvp_msg_id: int, winning_team: list, losing_team: list, delay_minutes=30):
+        
+        await asyncio.sleep(delay_minutes * 60) # Espera 30 minutos
+        
+        try:
+            mvp_msg = await channel.fetch_message(mvp_msg_id)
+            imvp_msg = await channel.fetch_message(imvp_msg_id)
+            
+            # 1. Calcular resultados
+            mvp_result = self._calculate_poll_result(mvp_msg, winning_team)
+            imvp_result = self._calculate_poll_result(imvp_msg, losing_team)
+            
+            # 2. Formatar a mensagem final
+            final_embed = discord.Embed(
+                title=f"🗳️ RESULTADO FINAL | Partida #{match_id}",
+                description=f"A votação foi encerrada após **{delay_minutes} minutos**.",
+                color=0x2ecc71
+            )
+            final_embed.add_field(name="🏆 MVP do Time Vencedor", value=mvp_result, inline=False)
+            final_embed.add_field(name="💀 iMVP (Inverse) do Time Perdedor", value=imvp_result, inline=False)
+            
+            await channel.send(embed=final_embed)
+            
+            # 3. Limpar embeds originais
+            await mvp_msg.edit(embed=mvp_msg.embeds[0].set_footer(text="Votação ENCERRADA."), view=None)
+            await imvp_msg.edit(embed=imvp_msg.embeds[0].set_footer(text="Votação ENCERRADA."), view=None)
+            
+        except discord.NotFound:
+            # Caso as mensagens tenham sido deletadas
+            await channel.send(f"❌ Não foi possível encontrar as mensagens da enquete da Partida #{match_id} para finalizar.")
+        except Exception as e:
+            # Log de erro
+            print(f"Erro ao finalizar a enquete da Partida #{match_id}: {e}")
+            pass
+
+
     # --- COMANDOS ---
     @commands.command(name="fila")
     async def fila(self, ctx):
+        
+        # 1. CHECAGEM: Se já existe uma partida em andamento, não permite criar uma nova fila
+        if self.current_match_id > 0 and await MatchRepository.get_match_details(self.current_match_id):
+            return await ctx.reply(f"⚠️ Já existe uma partida em andamento (ID #{self.current_match_id}). Finalize-a antes de criar uma nova fila.")
+        
+        # 2. OBTENDO O PRÓXIMO ID PARA EXIBIÇÃO (Se a fila estava limpa, inicia em 1)
+        if self.current_match_id == 0:
+            # Se o ID for 0 (primeira partida), define como 1
+            self.current_match_id = 1
+        
+        # 3. Se o card da fila anterior ainda existir (mas estiver ENCERRADO), ele deve ser deletado.
         if self.lobby_message:
             try: await self.lobby_message.delete()
             except: pass
+        
         embed = self.get_queue_embed()
         view = LobbyView(self)
         self.lobby_message = await ctx.send(embed=embed, view=view)
@@ -585,23 +777,47 @@ class Lobby(commands.Cog):
     async def resultado(self, ctx, match_id: int = None, winner: str = None):
         if not ctx.author.guild_permissions.administrator: return await ctx.reply("⛔ Apenas Administradores.")
         if not match_id or not winner: return await ctx.reply("❌ Uso: `.resultado <ID> <Blue/Red>`")
+        
         winner = winner.upper()
-        if winner not in ['BLUE', 'RED', 'AZUL', 'VERMELHO']: return await ctx.reply("❌ Inválido.")
         if winner == 'AZUL': winner = 'BLUE'
         if winner == 'VERMELHO': winner = 'RED'
+        if winner not in ['BLUE', 'RED']: return await ctx.reply("❌ Lado Inválido.")
+        
+        # NOVO: Obtem os detalhes antes de finalizar
+        match_details = await MatchRepository.get_match_details(match_id) # CHAMA O MÉTODO REQUERIDO
+        
+        # Se get_match_details retornar None, a partida não está ATIVA ou não existe.
+        if not match_details: 
+            return await ctx.reply(f"❌ Partida #{match_id} não encontrada ou já finalizada/anulada.")
+        
         status = await MatchRepository.finish_match(match_id, winner)
+        
         if status == "SUCCESS":
+            # NOVO: Inicia o processo de enquetes
+            await self._start_mvp_polls(ctx.channel, match_id, winner, match_details) 
+            
             embed = discord.Embed(title=f"✅ Partida #{match_id} Finalizada!", description=f"Vencedor: **TIME {winner}**", color=0x2ecc71)
             await ctx.reply(embed=embed)
-        elif status == "ALREADY_FINISHED": await ctx.reply(f"🔒 Já finalizada.")
-        else: await ctx.reply("❌ Partida não encontrada.")
+            
+            # NOVO: Limpa a fila e imobiliza o card principal para o estado ENCERRADO
+            await self.reset_lobby_state(match_id) 
+            
+        elif status == "ALREADY_FINISHED": await ctx.reply(f"🔒 Partida #{match_id} já finalizada.")
+        else: await ctx.reply(f"❌ Não foi possível finalizar a Partida #{match_id}.")
 
     @commands.command(name="anular")
     async def anular(self, ctx, match_id: int = None):
         if not ctx.author.guild_permissions.administrator: return await ctx.reply("⛔ Apenas Administradores.")
         if not match_id: return await ctx.reply("❌ Uso: `.anular <ID>`")
+        
+        # NOVO: Se a partida for anulada, o ID atual é incrementado para a próxima fila.
         status = await MatchRepository.cancel_match(match_id)
-        if status == "SUCCESS": await ctx.reply(f"🚫 Partida **#{match_id}** ANULADA.")
+        
+        if status == "SUCCESS": 
+            await ctx.reply(f"🚫 Partida **#{match_id}** ANULADA.")
+            # Imobiliza o card principal
+            await self.reset_lobby_state(match_id)
+            
         elif status == "NOT_ACTIVE": await ctx.reply(f"❌ Partida não ativa.")
         else: await ctx.reply("❌ Não encontrada.")
 

@@ -96,8 +96,6 @@ class PlayerRepository:
     @staticmethod
     async def get_internal_ranking(limit: int = None):
         async with get_session() as session:
-            # O order_by Player.losses já está correto, pois o padrão é ASC (crescente).
-            # Ou seja: Mais vitórias > Menos derrotas > Maior MMR.
             stmt = select(Player).order_by(desc(Player.wins), Player.losses, desc(Player.mmr))
             if limit: stmt = stmt.limit(limit)
             result = await session.execute(stmt)
@@ -124,6 +122,64 @@ class MatchRepository:
                 session.add(MatchPlayer(match_id=new_match.id, player_id=p['id'], side=TeamSide.RED))
             
             return new_match.id
+            
+    @staticmethod
+    async def get_match_details(match_id: int):
+        """
+        Busca a partida pelo ID e retorna os jogadores de cada time.
+        Necessário para iniciar as enquetes de MVP/iMVP.
+        """
+        async with get_session() as session:
+            # 1. Busca a partida (apenas partidas ATIVAS)
+            stmt = (
+                select(Match)
+                .where(Match.id == match_id)
+            )
+            result = await session.execute(stmt)
+            match = result.scalar_one_or_none()
+
+            # Retorna None se não for encontrado OU se já estiver FINALIZADO/CANCELADO
+            if not match or match.status != MatchStatus.IN_PROGRESS:
+                return None 
+
+            # 2. Busca todos os MatchPlayers para essa partida
+            stmt_players = (
+                select(MatchPlayer)
+                .where(MatchPlayer.match_id == match_id)
+            )
+            result_players = await session.execute(stmt_players)
+            match_players = result_players.scalars().all()
+            
+            # 3. Obtém os IDs de todos os jogadores
+            player_ids = [mp.player_id for mp in match_players]
+
+            # 4. Busca os dados completos dos Players (nome, mmr, etc.) em UMA query
+            stmt_players_data = select(Player).where(Player.discord_id.in_(player_ids))
+            result_players_data = await session.execute(stmt_players_data)
+            players_data = {p.discord_id: p for p in result_players_data.scalars().all()}
+
+            # 5. Mapeia e organiza nos times
+            blue_team = []
+            red_team = []
+            for mp in match_players:
+                player_obj = players_data.get(mp.player_id)
+                if player_obj:
+                    player_data = {
+                        'id': player_obj.discord_id,
+                        'name': player_obj.riot_name,
+                        'mmr': player_obj.mmr,
+                    }
+                    if mp.side == TeamSide.BLUE:
+                        blue_team.append(player_data)
+                    else:
+                        red_team.append(player_data)
+            
+            return {
+                'status': match.status.value,
+                'blue_team': blue_team,
+                'red_team': red_team
+            }
+
 
     @staticmethod
     async def finish_match(match_id: int, winning_side: str):
@@ -149,8 +205,7 @@ class MatchRepository:
 
             # Processa vitórias e derrotas
             for mp in match_players:
-                # É mais eficiente buscar o Player pelo ID em vez de executar uma nova query a cada iteração, 
-                # mas mantemos a query atual por enquanto se a performance for aceitável.
+                # Buscamos o Player de forma otimizada (poderia ser feito em batch, mas mantemos o loop para clareza)
                 player_stmt = select(Player).where(Player.discord_id == mp.player_id)
                 p_result = await session.execute(player_stmt)
                 player = p_result.scalar_one_or_none()

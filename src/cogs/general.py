@@ -237,6 +237,20 @@ class HelpSelect(discord.ui.Select):
                 ),
                 inline=False
             )
+            
+            # --- NOVO: ENQUETES MVP/iMVP ---
+            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+            
+            embed.add_field(
+                name="5️⃣ Votação Pós-Jogo",
+                value=(
+                    "Ao usar o `.resultado`, o bot inicia 2 enquetes de 30 minutos:\n"
+                    "🔹 **MVP (Time Vencedor):** Votação para o Melhor Jogador.\n"
+                    "🔹 **iMVP (Time Perdedor):** Votação para o Pior Jogador."
+                ),
+                inline=False
+            )
+            # -------------------------------
 
         elif value == "admin":
             embed = discord.Embed(title="🛡️ Painel do Administrador", color=0xff0000)
