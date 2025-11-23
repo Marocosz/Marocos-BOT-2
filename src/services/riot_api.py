@@ -93,11 +93,11 @@ class RiotAPI:
         )
         return await self._request(url)
 
-    async def get_active_game(self, puuid: str):
-        """Busca partida ao vivo (Spectator V5 - BR1) - Usa PUUID no endpoint"""
+    async def get_active_game(self, summoner_id: str):
+        """Busca partida ao vivo (Spectator V5 - BR1) - Requer Summoner ID"""
         url = (
             f"https://{self.platform_region}.api.riotgames.com"
-            f"/lol/spectator/v5/active-games/by-summoner/{puuid}"
+            f"/lol/spectator/v5/active-games/by-summoner/{summoner_id}"
         )
         return await self._request(url)
 

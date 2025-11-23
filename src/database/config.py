@@ -35,8 +35,12 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
         try:
             yield session
+            # Persiste as alterações no banco de dados se não houver exceção.
+            await session.commit() 
         except Exception:
+            # Desfaz as alterações se houver qualquer exceção.
             await session.rollback()
             raise
         finally:
+            # Fecha a sessão (redundante com async with, mas mantido por segurança/padrão)
             await session.close()

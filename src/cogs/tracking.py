@@ -38,7 +38,13 @@ class RankingTracking(commands.Cog):
         # Transforma Elo em número para comparar (Ex: Gold 4 < Gold 3)
         t_val = {'IRON': 0, 'BRONZE': 10, 'SILVER': 20, 'GOLD': 30, 'PLATINUM': 40, 'EMERALD': 50, 'DIAMOND': 60, 'MASTER': 70, 'GRANDMASTER': 80, 'CHALLENGER': 90, 'UNRANKED': -1}
         r_val = {'IV': 0, 'III': 1, 'II': 2, 'I': 3, '': 0}
-        return t_val.get(tier, 0) + r_val.get(rank, 0)
+        
+        # Se for Mestre+ o Rank é ignorado, a pontuação é fixa no TIER_VALUE.
+        if tier.upper() in ['MASTER', 'GRANDMASTER', 'CHALLENGER']:
+            # Master/GM/Challenger usam LP para diferenciacao, mas para promocao/democao, a mudanca de tier é o suficiente.
+            return t_val.get(tier.upper(), 0) + 1 # Adiciona um pequeno valor fixo para diferenciar de Diamond I
+        
+        return t_val.get(tier.upper(), 0) + r_val.get(rank.upper(), 0)
 
     # --- LOOP AUTOMÁTICO (A CADA 10 MINUTOS) ---
     @tasks.loop(minutes=10)
@@ -63,38 +69,73 @@ class RankingTracking(commands.Cog):
 
                     # 1. Busca Elo Atual na Riot
                     riot_ranks = await self.riot_service.get_rank_by_puuid(p.riot_puuid)
-                    data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
                     
-                    if not data: continue # Se não tem SoloQ, ignora
+                    # Filtra filas ativas
+                    solo_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
+                    flex_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
+                    
+                    active_queue = None
+                    queue_type = None
+                    old_tier, old_rank = "UNRANKED", "" # Default
+
+                    # PRIORIDADE: SoloQ
+                    if solo_data:
+                        active_queue = solo_data
+                        queue_type = 'RANKED_SOLO_5x5'
+                        old_tier, old_rank = p.solo_tier, p.solo_rank
+                    # FALLBACK: Flex
+                    elif flex_data:
+                        active_queue = flex_data
+                        queue_type = 'RANKED_FLEX_SR'
+                        old_tier, old_rank = p.flex_tier, p.flex_rank
+                    else:
+                        continue # Não tem rank em nenhuma fila
 
                     # 2. Compara com o Banco
-                    old_val = self.elo_value(p.solo_tier, p.solo_rank)
-                    new_val = self.elo_value(data['tier'], data['rank'])
+                    old_val = self.elo_value(old_tier, old_rank)
+                    new_val = self.elo_value(active_queue['tier'], active_queue['rank'])
+                    
+                    current_tier = active_queue['tier']
+                    current_rank = active_queue['rank']
+                    
+                    # 3. Lógica de Promoção/Rebaixamento (Verifica apenas mudança de Tier ou Divisão)
 
-                    # Se o banco diz Unranked mas a Riot diz Gold, ele subiu
-                    if p.solo_tier == "UNRANKED" and data['tier'] != "UNRANKED":
-                        # Primeiro registro de elo (não avisa, só salva)
-                        await PlayerRepository.update_riot_rank(p.discord_id, data['tier'], data['rank'], data['leaguePoints'], data['wins'], data['losses'], p.mmr)
+                    # Se o banco está desatualizado (por exemplo, "UNRANKED" ou Elo antigo)
+                    if old_val <= self.elo_value("UNRANKED", "") and new_val > self.elo_value("UNRANKED", ""):
+                        # Primeiro registro de elo (não avisa, só salva o estado inicial)
+                        await PlayerRepository.update_riot_rank(
+                            p.discord_id, current_tier, current_rank, active_queue['leaguePoints'], 
+                            active_queue['wins'], active_queue['losses'], p.mmr, queue_type=queue_type
+                        )
                         continue
 
-                    # Lógica de Subida/Descida
-                    if new_val > old_val:
-                        msg = random.choice(self.promotions).format(user=f"<@{p.discord_id}>", tier=data['tier'], rank=data['rank'])
-                        embed = discord.Embed(description=msg, color=0x2ecc71) # Verde
+                    if new_val != old_val:
+                        
+                        action = "promotions" if new_val > old_val else "demotions"
+                        color = 0x2ecc71 if new_val > old_val else 0xe74c3c
+                        
+                        queue_name = "Solo/Duo" if queue_type == 'RANKED_SOLO_5x5' else "Flex 5v5"
+                        
+                        msg = random.choice(getattr(self, action)).format(
+                            user=f"<@{p.discord_id}>", 
+                            tier=f"{current_tier} ({queue_name})", 
+                            rank=current_rank
+                        )
+                        embed = discord.Embed(description=msg, color=color)
                         await channel.send(embed=embed)
                         
                         # Atualiza DB
-                        await PlayerRepository.update_riot_rank(p.discord_id, data['tier'], data['rank'], data['leaguePoints'], data['wins'], data['losses'], p.mmr)
-
-                    elif new_val < old_val:
-                        msg = random.choice(self.demotions).format(user=f"<@{p.discord_id}>", tier=data['tier'], rank=data['rank'])
-                        embed = discord.Embed(description=msg, color=0xe74c3c) # Vermelho
-                        await channel.send(embed=embed)
-                        
-                        # Atualiza DB
-                        await PlayerRepository.update_riot_rank(p.discord_id, data['tier'], data['rank'], data['leaguePoints'], data['wins'], data['losses'], p.mmr)
+                        await PlayerRepository.update_riot_rank(
+                            p.discord_id, current_tier, current_rank, active_queue['leaguePoints'], 
+                            active_queue['wins'], active_queue['losses'], p.mmr, queue_type=queue_type
+                        )
                     
-                    # Se for igual, só atualiza PDL silenciosamente se quiser (opcional)
+                    # Se o elo não mudou (new_val == old_val), mas os dados (LP/Wins/Losses) podem ter mudado
+                    else:
+                         await PlayerRepository.update_riot_rank(
+                            p.discord_id, current_tier, current_rank, active_queue['leaguePoints'], 
+                            active_queue['wins'], active_queue['losses'], p.mmr, queue_type=queue_type
+                        )
 
                 except Exception as e:
                     print(f"Erro check loop player {p.riot_name}: {e}")
@@ -110,24 +151,27 @@ class RankingTracking(commands.Cog):
 
     @commands.command(name="fake_elo")
     @commands.has_permissions(administrator=True)
-    async def fake_elo(self, ctx, jogador: discord.Member, tier: str, rank: str):
+    async def fake_elo(self, ctx, jogador: discord.Member, tier: str, rank: str, fila: str = "SOLO"):
         """
         Muda o elo no BANCO DE DADOS (para testar o aviso).
-        Ex: .fake_elo @Marocos GOLD IV
-        (Na próxima verificação, o bot vai ver que na Riot está diferente e vai avisar)
+        Ex: .fake_elo @Marocos GOLD IV SOLO
         """
         player = await PlayerRepository.get_player_by_discord_id(jogador.id)
         if not player: return await ctx.reply("❌ Jogador não registrado.")
+        
+        # Mapeia a fila para o formato do repositório
+        queue_type = 'RANKED_FLEX_SR' if fila.upper() == 'FLEX' else 'RANKED_SOLO_5x5'
         
         # Força atualização no banco com dados falsos/antigos
         await PlayerRepository.update_riot_rank(
             discord_id=player.discord_id,
             tier=tier.upper(),
             rank=rank.upper(),
-            lp=0, wins=0, losses=0, calculated_mmr=player.mmr
+            lp=0, wins=0, losses=0, calculated_mmr=player.mmr,
+            queue_type=queue_type
         )
         
-        await ctx.reply(f"🕵️ **Modo Teste:** O Elo de {jogador.display_name} no banco agora é **{tier} {rank}**.\n⏳ Aguarde o loop automático (ou force o check) para ver o aviso de mudança.")
+        await ctx.reply(f"🕵️ **Modo Teste:** O Elo {fila.upper()} de {jogador.display_name} no banco agora é **{tier} {rank}**.\n⏳ Aguarde o loop automático (ou force o check) para ver o aviso de mudança.")
 
     @commands.command(name="forcar_check")
     @commands.has_permissions(administrator=True)

@@ -5,13 +5,15 @@ from src.database.repositories import PlayerRepository
 from src.services.riot_api import RiotAPI
 from src.services.matchmaker import MatchMaker
 
-# --- VIEW DE PAGINAÇÃO (NOVO) ---
+# --- VIEW DE PAGINAÇÃO (REFINADA) ---
 class RankingPaginationView(discord.ui.View):
-    def __init__(self, players, per_page=10):
-        super().__init__(timeout=120) # Botões expiram em 2 minutos
+    # Adicionando ctx para Interaction Check de segurança
+    def __init__(self, players, ctx, per_page=10):
+        super().__init__(timeout=120) 
         self.players = players
         self.per_page = per_page
         self.current_page = 0
+        self.ctx = ctx # Para verificar o autor da interação
         # Calcula total de páginas
         self.total_pages = max(1, (len(players) + per_page - 1) // per_page)
         self.update_buttons()
@@ -20,6 +22,10 @@ class RankingPaginationView(discord.ui.View):
         self.prev_button.disabled = (self.current_page == 0)
         self.next_button.disabled = (self.current_page == self.total_pages - 1)
         self.counter_button.label = f"{self.current_page + 1}/{self.total_pages}"
+        
+        if self.total_pages == 1:
+            self.prev_button.disabled = True
+            self.next_button.disabled = True
 
     def create_embed(self):
         start = self.current_page * self.per_page
@@ -53,6 +59,13 @@ class RankingPaginationView(discord.ui.View):
         embed.add_field(name="Jogadores", value=lista_fmt, inline=False)
         return embed
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Apenas o autor do comando pode interagir
+        if interaction.user.id == self.ctx.author.id:
+            return True
+        await interaction.response.send_message("✋ Apenas o autor do comando pode navegar aqui.", ephemeral=True)
+        return False
+    
     @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page -= 1
@@ -96,11 +109,10 @@ class Ranking(commands.Cog):
         }
         return queues.get(queue_id, "Normal")
 
-    # --- COMANDO 1: RANKING (ATUALIZADO COM PAGINAÇÃO) ---
+    # --- COMANDO 1: RANKING (ATUALIZADO COM PAGINAÇÃO E CHECK DE INTERAÇÃO) ---
     @commands.command(name="ranking", aliases=["top", "leaderboard"])
     async def ranking(self, ctx):
         """Mostra TODOS os jogadores da Liga Interna (Paginado)"""
-        # Busca sem limite (limit=None) para pegar todo mundo
         players = await PlayerRepository.get_internal_ranking(limit=None)
         
         if not players:
@@ -109,13 +121,12 @@ class Ranking(commands.Cog):
             await ctx.reply(embed=embed)
             return
 
-        # Cria a View de Paginação
-        view = RankingPaginationView(players, per_page=10)
+        # Passa o contexto (ctx) para o RankingPaginationView para o interaction_check
+        view = RankingPaginationView(players, ctx=ctx, per_page=10)
         
-        # Envia a primeira página
         await ctx.reply(embed=view.create_embed(), view=view)
 
-    # --- COMANDO 2: PERFIL (MANTIDO INTACTO) ---
+    # --- COMANDO 2: PERFIL (CORRIGIDO PARA USO DE SOLO/FLEX E CHAMADA DE REPOSITÓRIO) ---
     @commands.command(name="perfil")
     async def perfil(self, ctx, jogador: discord.Member = None):
         """Exibe o cartão de jogador COMPLETO e Atualiza MMR."""
@@ -131,9 +142,10 @@ class Ranking(commands.Cog):
             top_mastery = []
             summoner_level = "N/A"
             live_icon_id = player.riot_icon_id 
+            mmr_calculated = player.mmr
 
             try:
-                # 1. Busca Dados Basicos (Level e Icone ATUAL)
+                # 1. Busca Dados Básicos e Summoner ID
                 summoner_data = await self.riot_service.get_summoner_by_puuid(player.riot_puuid)
                 if summoner_data:
                     summoner_level = summoner_data.get('summonerLevel', 'N/A')
@@ -143,66 +155,74 @@ class Ranking(commands.Cog):
                 riot_ranks = await self.riot_service.get_rank_by_puuid(player.riot_puuid)
                 top_mastery = await self.riot_service.get_top_mastery(player.riot_puuid)
                 
-                # --- ATUALIZAÇÃO DE MMR (LÓGICA NOVA) ---
-                # Tenta usar SoloQ para o MMR. Se não tiver, usa Flex como fallback.
-                mmr_source = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
+                # --- ATUALIZAÇÃO DE RANK E MMR NO BANCO (LÓGICA NOVA) ---
                 
-                if not mmr_source:
-                    mmr_source = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
+                solo_rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
+                flex_rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
 
+                mmr_source = solo_rank_data or flex_rank_data # Prioriza SoloQ para cálculo de MMR
+                
                 if mmr_source:
-                    # Calcula usando a nova classe MatchMaker V2 (com peso de fila e winrate)
-                    new_mmr = MatchMaker.calculate_adjusted_mmr(
+                    # Cálculo de MMR
+                    mmr_calculated = MatchMaker.calculate_adjusted_mmr(
                         tier=mmr_source['tier'], 
                         rank=mmr_source['rank'], 
                         lp=mmr_source['leaguePoints'], 
                         wins=mmr_source['wins'], 
                         losses=mmr_source['losses'],
-                        queue_type=mmr_source['queueType'] # Passamos o tipo da fila para aplicar penalidade se for Flex
+                        queue_type=mmr_source['queueType']
                     )
-                    
-                    # Salva no Banco
+                
+                # Salva os dados de SoloQ
+                if solo_rank_data:
                     await PlayerRepository.update_riot_rank(
                         discord_id=player.discord_id, 
-                        tier=mmr_source['tier'], 
-                        rank=mmr_source['rank'], 
-                        lp=mmr_source['leaguePoints'],
-                        wins=mmr_source['wins'],
-                        losses=mmr_source['losses'],
-                        calculated_mmr=new_mmr
+                        tier=solo_rank_data['tier'], 
+                        rank=solo_rank_data['rank'], 
+                        lp=solo_rank_data['leaguePoints'],
+                        wins=solo_rank_data['wins'],
+                        losses=solo_rank_data['losses'],
+                        calculated_mmr=mmr_calculated, # Salva o MMR calculado com base na fonte prioritária (SoloQ)
+                        queue_type='RANKED_SOLO_5x5' 
                     )
-                    
-                    # Atualiza objeto local para o card mostrar o valor novo
-                    player.mmr = new_mmr
-                    player.solo_wins = mmr_source['wins']
-                    player.solo_losses = mmr_source['losses']
-                else:
-                    # Se for Unranked total
+                
+                # Salva os dados de Flex
+                if flex_rank_data:
+                    # Não passamos o calculated_mmr novamente para evitar sobrescrever o valor
+                    await PlayerRepository.update_riot_rank(
+                        discord_id=player.discord_id, 
+                        tier=flex_rank_data['tier'], 
+                        rank=flex_rank_data['rank'], 
+                        lp=flex_rank_data['leaguePoints'],
+                        wins=flex_rank_data['wins'],
+                        losses=flex_rank_data['losses'],
+                        queue_type='RANKED_FLEX_SR'
+                    )
+                
+                # Se Unranked total, atualiza com MMR base
+                if not solo_rank_data and not flex_rank_data:
                     await PlayerRepository.update_riot_rank(player.discord_id, "UNRANKED", "", 0, 0, 0, 1000)
-                    player.mmr = 1000
-                    
+
+                # Rebusca o objeto Player do banco para refletir TODAS as atualizações (incluindo solo_wins/flex_wins etc)
+                player = await PlayerRepository.get_player_by_discord_id(target_user.id)
+                
             except Exception as e:
-                print(f"Erro API Riot: {e}")
+                print(f"Erro API Riot durante perfil/update: {e}")
 
             # --- DESIGN DO CARD ---
             embed_color = 0x2b2d31 
-            solo = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
-            flex = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
-
-            if solo:
+            
+            # Usar dados frescos do objeto 'player' recarregado
+            solo_data = {'tier': player.solo_tier, 'rank': player.solo_rank, 'lp': player.solo_lp, 'wins': player.solo_wins, 'losses': player.solo_losses}
+            flex_data = {'tier': player.flex_tier, 'rank': player.flex_rank, 'lp': player.flex_lp, 'wins': player.flex_wins, 'losses': player.flex_losses}
+            
+            if player.solo_tier != "UNRANKED":
                 tier_colors = {
-                    'IRON': 0x564b49, 
-                    'BRONZE': 0x8c5133, 
-                    'SILVER': 0xc0c0c0, 
-                    'GOLD': 0xffd700, 
-                    'PLATINUM': 0x2ecc71, 
-                    'EMERALD': 0x009475, 
-                    'DIAMOND': 0x3498db, 
-                    'MASTER': 0x9b59b6, 
-                    'GRANDMASTER': 0xe74c3c, 
-                    'CHALLENGER': 0xf1c40f
+                    'IRON': 0x564b49, 'BRONZE': 0x8c5133, 'SILVER': 0xc0c0c0, 'GOLD': 0xffd700, 
+                    'PLATINUM': 0x2ecc71, 'EMERALD': 0x009475, 'DIAMOND': 0x3498db, 
+                    'MASTER': 0x9b59b6, 'GRANDMASTER': 0xe74c3c, 'CHALLENGER': 0xf1c40f
                 }
-                embed_color = tier_colors.get(solo['tier'], 0x2b2d31)
+                embed_color = tier_colors.get(player.solo_tier, 0x2b2d31)
 
             embed = discord.Embed(color=embed_color)
             riot_link = f"[{player.riot_name}](https://www.op.gg/summoners/br/{player.riot_name.replace('#', '-')})"
@@ -217,17 +237,18 @@ class Ranking(commands.Cog):
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             def format_rank_detailed(data):
-                if not data: return "```st\nUnranked\n```"
+                if data['tier'] == "UNRANKED": return "```st\nUnranked\n```"
                 wins = data['wins']
                 losses = data['losses']
                 total = wins + losses
                 wr = (wins / total * 100) if total > 0 else 0
                 return (f"{self.get_tier_emoji(data['tier'])} **{data['tier']} {data['rank']}**\n"
-                        f"Info: `{data['leaguePoints']} PDL` • `{wr:.0f}% WR`\n"
+                        f"Info: `{data['lp']} PDL` • `{wr:.0f}% WR`\n"
                         f"Score: `{wins}V` - `{losses}D`")
 
-            embed.add_field(name="🛡️ Solo/Duo", value=format_rank_detailed(solo), inline=True)
-            embed.add_field(name="⚔️ Flex 5v5", value=format_rank_detailed(flex), inline=True)
+            # Agora usa os dados carregados do objeto Player
+            embed.add_field(name="🛡️ Solo/Duo", value=format_rank_detailed(solo_data), inline=True)
+            embed.add_field(name="⚔️ Flex 5v5", value=format_rank_detailed(flex_data), inline=True)
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             if top_mastery:
@@ -246,10 +267,10 @@ class Ranking(commands.Cog):
             
             stats_block = (
                 f"```yaml\n"
-                f"MMR:   {player.mmr}\n"
+                f"MMR:  {player.mmr}\n"
                 f"Jogos: {total_ih}\n"
-                f"V/D:   {player.wins} - {player.losses}\n"
-                f"Win%:  {wr_ih:.1f}%\n"
+                f"V/D:  {player.wins} - {player.losses}\n"
+                f"Win%: {wr_ih:.1f}%\n"
                 f"```"
             )
             
@@ -258,7 +279,7 @@ class Ranking(commands.Cog):
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO 3: MMR (AUDITORIA DETALHADA) ---
+    # --- COMANDO 3: MMR (MANTIDO INTACTO) ---
     @commands.command(name="mmr")
     async def mmr(self, ctx, jogador: discord.Member = None):
         """Relatório detalhado da pontuação"""
@@ -299,7 +320,7 @@ class Ranking(commands.Cog):
         phase = "Veterano"
         k_factor = 2
         
-        if total_games < 50:   
+        if total_games < 50:  
             k_factor = 20
             phase = "Calibração (Smurf?)"
         elif total_games < 100: 
@@ -311,7 +332,7 @@ class Ranking(commands.Cog):
         elif total_games < 200: 
             k_factor = 4
             phase = "Consolidação"
-        else:                   
+        else:          
             k_factor = 2
             phase = "Elo Definido"
         
@@ -351,8 +372,8 @@ class Ranking(commands.Cog):
 
         formula_visual = (
             f"```ini\n"
-            f"[ Base Ajustada ]   [ Bônus WR ]     [ MMR FINAL ]\n"
-            f"    {base_adjusted:<5}       +    {bonus:<5}      =    {final}\n"
+            f"[ Base Ajustada ]  [ Bônus WR ]   [ MMR FINAL ]\n"
+            f"  {base_adjusted:<5}    +  {bonus:<5}   =  {final}\n"
             f"```"
         )
         
@@ -413,7 +434,7 @@ class Ranking(commands.Cog):
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO 5: LIVE (MANTIDO INTACTO) ---
+    # --- COMANDO 5: LIVE (CORRIGIDO PARA USO DE SUMMONER ID) ---
     @commands.command(name="live")
     async def live(self, ctx, jogador: discord.Member = None):
         """Verifica se o jogador está em partida agora"""
@@ -424,7 +445,16 @@ class Ranking(commands.Cog):
             await ctx.reply("❌ Jogador não registrado.")
             return
 
-        data = await self.riot_service.get_active_game(player.riot_puuid)
+        # 1. Obter Summoner ID do PUUID
+        summoner_data = await self.riot_service.get_summoner_by_puuid(player.riot_puuid)
+        if not summoner_data:
+            await ctx.reply("❌ Não foi possível obter os dados da conta Riot. Tente `.perfil`.")
+            return
+            
+        summoner_id = summoner_data.get('id')
+        
+        # 2. Usar Summoner ID para buscar a partida ativa (Fluxo CORRETO)
+        data = await self.riot_service.get_active_game(summoner_id)
         
         if not data:
             await ctx.reply(f"💤 **{player.riot_name}** não está jogando no momento.")

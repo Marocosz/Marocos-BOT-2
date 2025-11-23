@@ -8,31 +8,56 @@ class Utility(commands.Cog):
         self.bot = bot
         self.riot_service = RiotAPI()
         self.champions_cache = {} 
+        self.bot.loop.create_task(self._load_champions()) # <--- MELHORIA: Carrega o cache na inicialização
 
     async def _load_champions(self):
-        if not self.champions_cache:
-            data = await self.riot_service.get_all_champions_data()
-            if data:
-                for key, info in data['data'].items():
-                    self.champions_cache[info['name'].lower()] = key
-                    self.champions_cache[key.lower()] = key
+        """Carrega e popula o cache local com {nome_limpo: RiotKey}"""
+        # Garante que o cache só é carregado uma vez
+        if self.champions_cache: return
+        
+        data = await self.riot_service.get_all_champions_data()
+        if data:
+            for key_riot, info in data['data'].items():
+                # Riot Key é o nome usado na URL (Ex: "Fiddlesticks")
+                name_clean = info['name'].lower().replace(" ", "").replace("'", "").replace(".", "")
+                
+                self.champions_cache[name_clean] = key_riot # Nome Limpo -> Riot Key
+                self.champions_cache[key_riot.lower()] = key_riot # Riot Key (Lower) -> Riot Key
+            
+            # Removidas as linhas de apelido que causaram o bug do caractere e eram redundantes/mal formatadas.
+            
+            print(f"[Utility] Cache de campeões carregado: {len(self.champions_cache)//2} campeões.")
 
-    def find_champion_key(self, search: str):
-        search = search.lower().replace(" ", "").replace("'", "")
-        if search in self.champions_cache:
-            return self.champions_cache[search]
-        matches = difflib.get_close_matches(search, self.champions_cache.keys(), n=1, cutoff=0.6)
+
+    async def find_champion_key(self, search: str):
+        """Busca a Riot Key (nome da API) com correspondência difusa."""
+        # Garante que o cache está carregado antes de buscar
+        if not self.champions_cache:
+            await self._load_champions()
+
+        search_clean = search.lower().replace(" ", "").replace("'", "").replace(".", "")
+        
+        # 1. Busca Exata
+        if search_clean in self.champions_cache:
+            return self.champions_cache[search_clean]
+        
+        # 2. Busca Difusa
+        # Usamos 0.7 para ser mais assertivo
+        matches = difflib.get_close_matches(search_clean, self.champions_cache.keys(), n=1, cutoff=0.7)
+        
         if matches:
             return self.champions_cache[matches[0]]
+            
         return None
 
     # Helper para limpar lanes
     def normalize_lane(self, lane: str):
         l = lane.lower().strip()
+        # slug, pretty_name
         if l in ['top', 'topo']: return 'top_lane', 'Top Lane'
         if l in ['jungle', 'jg', 'selva']: return 'jungle', 'Jungle'
         if l in ['mid', 'meio']: return 'mid_lane', 'Mid Lane'
-        if l in ['adc', 'bot', 'bottom']: return 'adc', 'ADC'
+        if l in ['adc', 'bot', 'bottom', 'atirador']: return 'adc', 'ADC'
         if l in ['sup', 'support', 'suporte']: return 'support', 'Support'
         return None, None
 
@@ -53,16 +78,21 @@ class Utility(commands.Cog):
             return
 
         # Gera links profundos (Deep Links) já filtrados
-        slug_ugg = "jungle" if slug == "jungle" else slug.replace("_lane", "") # u.gg usa 'top', 'mid'
-        slug_opgg = "jungle" if slug == "jungle" else slug.replace("_lane", "")
+        # u.gg e op.gg usam slubs ligeiramente diferentes
+        slug_web = "jungle" if slug == "jungle" else slug.replace("_lane", "")
+        if slug_web == 'adc': slug_web = 'bot' # u.gg usa 'bot' para adc
 
-        ugg_url = f"https://u.gg/lol/jungle-tier-list" if slug == 'jungle' else f"https://u.gg/lol/{slug_ugg}-tier-list"
-        opgg_url = f"https://www.op.gg/champions?position={slug_opgg}"
-        lolalytics_url = f"https://lolalytics.com/lol/tierlist/?lane={slug_opgg}"
+        ugg_url = f"https://u.gg/lol/tier-list" if slug == 'jungle' else f"https://u.gg/lol/{slug_web}-tier-list"
+        opgg_url = f"https://www.op.gg/champions?position={slug_web}"
+        lolalytics_url = f"https://lolalytics.com/lol/tierlist/?lane={slug_web}"
 
+        # Garante que a versão está atualizada antes de enviar
+        await self.riot_service.update_version()
+        current_version = self.riot_service.ddragon_version
+        
         embed = discord.Embed(
             title=f"🏆 Meta Report: {pretty_name}", 
-            description=f"Confira os campeões com maior Winrate no **Patch {self.riot_service.ddragon_version}**:",
+            description=f"Confira os campeões com maior Winrate no **Patch {current_version}**:",
             color=0xff00ff
         )
         
@@ -83,8 +113,8 @@ class Utility(commands.Cog):
             await ctx.reply("❌ Digite o nome do campeão. Ex: `.build yasuo`")
             return
 
-        await self._load_champions()
-        key = self.find_champion_key(campeao)
+        # Usa a nova lógica de busca
+        key = await self.find_champion_key(campeao)
 
         if not key:
             await ctx.reply(f"❌ Campeão **{campeao}** não encontrado.")

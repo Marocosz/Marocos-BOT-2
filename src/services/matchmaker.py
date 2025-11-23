@@ -33,12 +33,21 @@ class MatchMaker:
         Calcula o MMR Real.
         Fórmula: ((Base + LP) * PesoFila) + (DiffWinrate * FatorIncerteza)
         """
+        tier_upper = tier.upper()
+        rank_upper = rank.upper()
+
         # 1. Base Score (Elo Visual Puro)
-        tier_score = MatchMaker.TIER_VALUES.get(tier.upper(), 1000)
-        rank_score = MatchMaker.RANK_VALUES.get(rank.upper(), 0)
-        
-        # Mestre+ usa LP direto. Outros elos somam ao teto da divisão.
-        base_score = tier_score + rank_score + lp
+        tier_score = MatchMaker.TIER_VALUES.get(tier_upper, 1000)
+
+        # Lógica especial para Mestre+ (onde o Rank é sempre 'I' ou vazio, e a pontuação é o Base + LP)
+        if tier_upper in ['MASTER', 'GRANDMASTER', 'CHALLENGER']:
+            # Para Mestre+, o Base Score é o valor do TIER_VALUES (2800) + o LP direto.
+            base_score = tier_score + lp
+        else:
+            # Para elos normais (Iron a Diamond)
+            rank_score = MatchMaker.RANK_VALUES.get(rank_upper, 0)
+            # Base + Divisão + LP
+            base_score = tier_score + rank_score + lp
 
         # 2. Peso da Fila (Nerf na Flex mantido)
         # Se for Flex, vale 85% do MMR de SoloQ na base
@@ -50,7 +59,7 @@ class MatchMaker:
 
         # 3. Lógica de Velocity (O peso de ter menos partidas)
         winrate = (wins / total_games) * 100
-        wr_diff = winrate - 50  # Ex: 60% WR -> +10 pontos de diferença
+        wr_diff = winrate - 50 # Ex: 60% WR -> +10 pontos de diferença
 
         # K-Factor: Escada de estabilidade detalhada
         if total_games < 50:
@@ -58,11 +67,11 @@ class MatchMaker:
         elif total_games < 100:
             k_factor = 12 # Subida Rápida
         elif total_games < 150:
-            k_factor = 8  # Estabilizando
+            k_factor = 8 # Estabilizando
         elif total_games < 200:
-            k_factor = 4  # Quase travado
+            k_factor = 4 # Quase travado
         else:
-            k_factor = 2  # Hardstuck (>200 jogos): Impacto mínimo do WR
+            k_factor = 2 # Hardstuck (>200 jogos): Impacto mínimo do WR
 
         # Bônus ou Penalidade calculado
         bonus = wr_diff * k_factor
@@ -86,9 +95,9 @@ class MatchMaker:
         red = []
         
         # 2. Distribuição "Snake" (A-B-B-A-A-B...)
-        # Isso garante que o 1º (Melhor) fique contra o 2º e 3º.
+        # Garante que o 1º (Melhor) fique contra o 2º e 3º.
         # Padrão de índices para o Blue: 0, 3, 4, 7, 8
-        # Padrão de índices para o Red:  1, 2, 5, 6, 9
+        # Padrão de índices para o Red:  1, 2, 5, 6, 9
         
         for i, p in enumerate(sorted_players):
             if i in [0, 3, 4, 7, 8]:

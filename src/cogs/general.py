@@ -1,9 +1,24 @@
 import discord
 from discord.ext import commands
 
+# --- BOTÃO DE FECHAR ---
+class CloseButton(discord.ui.Button):
+    def __init__(self, user_id: int): # Adicionado user_id
+        super().__init__(label="Fechar Painel", style=discord.ButtonStyle.red, emoji="❌", row=1)
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction):
+        # Apenas quem invocou o comando pode fechar
+        if interaction.user.id != self.user_id: # Checagem simplificada
+            await interaction.response.send_message("Apenas o autor do comando pode fechar este painel.", ephemeral=True)
+            return
+
+        # Remove a mensagem de ajuda
+        await interaction.message.delete()
+        
 # --- MENU DE NAVEGAÇÃO ---
 class HelpSelect(discord.ui.Select):
-    def __init__(self, bot):
+    def __init__(self, bot, user_id: int): # Adicionado user_id
         options = [
             discord.SelectOption(
                 label="Início", 
@@ -31,10 +46,16 @@ class HelpSelect(discord.ui.Select):
                 emoji="🛡️", value="admin"
             ),
         ]
-        super().__init__(placeholder="📚 Navegue pelo Manual da Liga...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="📚 Navegue pelo Manual da Liga...", min_values=1, max_values=1, options=options, row=0)
         self.bot = bot
+        self.user_id = user_id # Guarda o user_id
 
     async def callback(self, interaction: discord.Interaction):
+        # Impedir que outro usuário use o Select Menu
+        if interaction.user.id != self.user_id: # Checagem simplificada
+            await interaction.response.send_message("Apenas o autor do comando pode navegar no menu de ajuda.", ephemeral=True)
+            return
+
         value = self.values[0]
         
         if value == "home":
@@ -219,7 +240,7 @@ class HelpSelect(discord.ui.Select):
 
         elif value == "admin":
             embed = discord.Embed(title="🛡️ Painel do Administrador", color=0xff0000)
-            embed.description = "Ferramentas de gestão de partidas."
+            embed.description = "Ferramentas de gestão de partidas e monitoramento da Liga."
             
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
@@ -244,14 +265,34 @@ class HelpSelect(discord.ui.Select):
                 ),
                 inline=False
             )
+            
+            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+
+            embed.add_field(
+                name="🚨 Rastreamento de Elo (Tracking)",
+                value=(
+                    "• **`.config_aviso #canal`**: Define o canal para alertas de Promoção/Queda.\n"
+                    "• **`.forcar_check`**: Inicia a verificação de Elo imediatamente.\n"
+                    "• **`.fake_elo @user TIER RANK [FILA]`**: Força um Elo no DB para testes de aviso. "
+                    "*(Ex: `.fake_elo @Marcos GOLD I SOLO`)*"
+                ),
+                inline=False
+            )
+
+
             embed.set_footer(text="Apenas usuários com permissão de Administrador podem usar.")
 
-        await interaction.response.edit_message(embed=embed)
+        # Recria o view para resetar o Select Menu ao placeholder
+        # Adiciona o botão de fechar
+        new_view = HelpView(self.bot, self.user_id) # <-- Deve usar self.user_id
+        await interaction.response.edit_message(embed=embed, view=new_view)
 
 class HelpView(discord.ui.View):
-    def __init__(self, bot):
+    def __init__(self, bot, user_id: int): # Adicionado user_id
         super().__init__(timeout=120)
-        self.add_item(HelpSelect(bot))
+        self.user_id = user_id # Guarda user_id
+        self.add_item(HelpSelect(bot, user_id)) # Passa user_id
+        self.add_item(CloseButton(user_id)) # Passa user_id
 
 class General(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -267,7 +308,7 @@ class General(commands.Cog):
         )
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         
-        view = HelpView(self.bot)
+        view = HelpView(self.bot, ctx.author.id) # Passa o ID do autor
         await ctx.send(embed=embed, view=view)
 
 async def setup(bot: commands.Bot):
