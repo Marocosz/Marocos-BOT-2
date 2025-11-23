@@ -63,7 +63,7 @@ class ManualCaptainView(discord.ui.View):
             await self.lobby_cog.start_coinflip_phase(self.admin_interaction, self.players, self.cap1, cap2)
 
     def add_cancel_button(self):
-        btn = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.danger, row=2, emoji="✖️")
+        btn = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.secondary, row=2, emoji="✖️")
         btn.callback = self.cancel_callback
         self.add_item(btn)
 
@@ -95,7 +95,7 @@ class DraftView(discord.ui.View):
             picker_name = self.cap_blue['name'] if self.turn == 'BLUE' else self.cap_red['name']
             self.add_item(PlayerSelect(self.pool, placeholder=f"Vez de {picker_name} escolher..."))
         
-        cancel_btn = discord.ui.Button(label="Cancelar Draft (Admin)", style=discord.ButtonStyle.danger, row=2, emoji="✖️")
+        cancel_btn = discord.ui.Button(label="Cancelar Draft (Admin)", style=discord.ButtonStyle.secondary, row=2, emoji="✖️")
         cancel_btn.callback = self.cancel_callback
         self.add_item(cancel_btn)
 
@@ -212,11 +212,11 @@ class SideSelectView(discord.ui.View):
     async def blue_side(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.start_draft_phase(interaction, cap_blue=self.cap_secondary, cap_red=self.cap_priority, first_pick_side='RED')
 
-    @discord.ui.button(label="Quero Lado Vermelho", style=discord.ButtonStyle.danger, emoji="🔴")
+    @discord.ui.button(label="Quero Lado Vermelho", style=discord.ButtonStyle.secondary, emoji="🔴")
     async def red_side(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.start_draft_phase(interaction, cap_blue=self.cap_priority, cap_red=self.cap_secondary, first_pick_side='BLUE')
 
-    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.danger, emoji="✖️", row=2)
+    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.secondary, emoji="✖️", row=2)
     async def cancel_side(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("⛔ Apenas Admins.", ephemeral=True)
@@ -280,11 +280,11 @@ class BalancedSideSelectView(discord.ui.View):
     async def choose_blue(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.finalize_match(interaction, blue_team=self.winning_team, red_team=self.losing_team)
 
-    @discord.ui.button(label="Escolher RED", style=discord.ButtonStyle.danger, emoji="🔴")
+    @discord.ui.button(label="Escolher RED", style=discord.ButtonStyle.secondary, emoji="🔴")
     async def choose_red(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.finalize_match(interaction, blue_team=self.losing_team, red_team=self.winning_team)
 
-    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.danger, emoji="✖️", row=2)
+    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.secondary, emoji="✖️", row=2)
     async def cancel_bal(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("⛔ Apenas Admins.", ephemeral=True)
@@ -313,7 +313,7 @@ class LobbyView(discord.ui.View):
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.lobby_cog.process_join(interaction)
 
-    @discord.ui.button(label="Sair", style=discord.ButtonStyle.danger, emoji="🏃", custom_id="lobby_leave")
+    @discord.ui.button(label="Sair", style=discord.ButtonStyle.secondary, emoji="🏃", custom_id="lobby_leave")
     async def leave_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.lobby_cog.process_leave(interaction)
 
@@ -322,7 +322,7 @@ class LobbyView(discord.ui.View):
         await interaction.response.send_message("Use `.perfil` para ver seus stats.", ephemeral=True)
 
     # NOVO BOTÃO: Cancelar Fila (Admin)
-    @discord.ui.button(label="Cancelar Fila (Admin)", style=discord.ButtonStyle.danger, emoji="✖️", custom_id="lobby_cancel", row=1)
+    @discord.ui.button(label="Cancelar Fila (Admin)", style=discord.ButtonStyle.secondary, emoji="✖️", custom_id="lobby_cancel", row=1)
     async def cancel_queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("⛔ Apenas Administradores podem cancelar a fila.", ephemeral=True)
@@ -332,7 +332,7 @@ class LobbyView(discord.ui.View):
 
 
     # Note que o decorator abaixo define row=1, o que o autoloader usará no modo habilitado.
-    @discord.ui.button(label="Resetar Fila (Admin)", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="lobby_reset", row=1)
+    @discord.ui.button(label="Resetar Fila (Admin)", style=discord.ButtonStyle.secondary, emoji="🗑️", custom_id="lobby_reset", row=1)
     async def reset_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("⛔ Apenas Administradores podem resetar a fila.", ephemeral=True)
@@ -391,7 +391,7 @@ class ModeSelectView(discord.ui.View):
         await self.cleanup(interaction) 
         self.stop()
 
-    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.danger, emoji="✖️", row=2)
+    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.secondary, emoji="✖️", row=2)
     async def cancel_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.lobby_cog.reset_lobby_state()
         await self.cleanup(interaction) 

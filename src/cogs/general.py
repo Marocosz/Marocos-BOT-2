@@ -4,7 +4,7 @@ from discord.ext import commands
 # --- BOTÃO DE FECHAR ---
 class CloseButton(discord.ui.Button):
     def __init__(self, user_id: int): # Adicionado user_id
-        super().__init__(label="Fechar Painel", style=discord.ButtonStyle.red, emoji="❌", row=1)
+        super().__init__(label="Fechar Painel", style=discord.ButtonStyle.secondary, emoji="❌", row=1)
         self.user_id = user_id
 
     async def callback(self, interaction: discord.Interaction):

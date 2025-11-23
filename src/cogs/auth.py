@@ -89,8 +89,6 @@ class Auth(commands.Cog):
         Ex: .registrar Marocos#BR1 Mid Top
         """
 
-        # --- PARSER NOVO (ACEITA ESPAÇOS + EMOJIS + UNICODE) ---
-
         if not args:
             embed = discord.Embed(title="❌ Formato Inválido", color=0xff0000)
             embed.description = (
@@ -101,40 +99,48 @@ class Auth(commands.Cog):
             )
             await ctx.reply(embed=embed)
             return
+            
+        # --- PARSER NOVO (LIMPEZA IMEDIATA E PARSING ROBUSTO) ---
 
-        parts = args.split()
+        # 1. Limpar o argumento principal imediatamente para remover caracteres invisíveis/Unicode
+        cleaned_args = self.remove_invisible(args).strip()
+        parts = cleaned_args.split() # Agora o split deve ser limpo
 
         if len(parts) < 2:
             await ctx.reply("❌ Você precisa informar pelo menos Nick#TAG e a lane principal.")
             return
 
-        main_lane = parts[-1]
-        sec_lane = None
+        # 2. Identificar Main Lane (última parte)
+        main_lane_input = parts[-1]
+        
+        # 3. Identificar Secondary Lane (se houver e for válida)
+        sec_lane_input = None
+        riot_id_parts = parts[:-1]
 
-        if len(parts) >= 3:
-            possible_sec = parts[-2]
-            if self.clean_lane(possible_sec):
-                sec_lane = possible_sec
-                riot_id = " ".join(parts[:-2])
-            else:
-                riot_id = " ".join(parts[:-1])
-        else:
-            riot_id = " ".join(parts[:-1])
-
-        # --- REMOVE CARACTERES INVISÍVEIS ← IMPORTANTE! ---
-        riot_id = self.remove_invisible(riot_id).strip()
+        if len(riot_id_parts) > 0:
+            # Verifica se a penúltima parte (última de riot_id_parts) é uma lane
+            possible_sec_lane = riot_id_parts[-1]
+            if self.clean_lane(possible_sec_lane):
+                sec_lane_input = possible_sec_lane
+                # Se encontrou Sec Lane, remove ela das partes do Riot ID
+                riot_id_parts = riot_id_parts[:-1]
+        
+        # 4. O que sobrou é o Riot ID (Nome + TAG)
+        riot_id = " ".join(riot_id_parts).strip()
 
         # ---------------------------------------------------------
 
+        # 5. Checagem de formato final
         if "#" not in riot_id:
             await ctx.reply("❌ O Nick deve ter a TAG. Ex: `Nome#BR1`")
             return
 
         # Limpeza das lanes
-        m_lane_clean = self.clean_lane(main_lane)
-        s_lane_clean = self.clean_lane(sec_lane)
+        m_lane_clean = self.clean_lane(main_lane_input)
+        s_lane_clean = self.clean_lane(sec_lane_input)
 
         if not m_lane_clean:
+            # Essa checagem só deve falhar se o usuário colocou algo inválido como última palavra
             await ctx.reply("❌ Lane principal inválida! Use: Top, Jungle, Mid, Adc ou Sup.")
             return
 
