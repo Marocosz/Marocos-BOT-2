@@ -109,58 +109,60 @@ class Auth(commands.Cog):
         # 2. Encontrar a última parte que NÃO é uma lane
         parts = cleaned_full_args.split() 
         
-        # Inicia com as partes da lane como sendo as últimas da lista.
-        lane_parts = []
+        # Lista temporária para armazenar as lanes na ordem [L2, L1] (se encontradas)
+        found_lane_parts = [] 
         
-        # Verifica a última e a penúltima parte para ver se são lanes válidas.
+        # Tenta extrair a L2 (parts[-1]) e depois a L1 (parts[-2])
         if len(parts) >= 1:
-            # Tenta pegar a última como Main Lane
-            main_lane_input = parts[-1]
-            if self.clean_lane(main_lane_input):
-                lane_parts.append(main_lane_input)
+            # Tenta pegar a última como L2 (Secondary na lógica de parsing, mas L2 na ordem)
+            l2_input = parts[-1]
+            if self.clean_lane(l2_input):
+                found_lane_parts.append(l2_input) # L2 (ex: Top)
                 
                 if len(parts) >= 2:
-                    # Tenta pegar a penúltima como Sec Lane
-                    sec_lane_input = parts[-2]
-                    if self.clean_lane(sec_lane_input):
-                        lane_parts.append(sec_lane_input)
+                    # Tenta pegar a penúltima como L1 (Main na lógica de parsing, mas L1 na ordem)
+                    l1_input = parts[-2]
+                    if self.clean_lane(l1_input):
+                        found_lane_parts.append(l1_input) # L1 (ex: Mid)
         
         # 3. Mapeamento das Lanes e Riot ID
         
-        # Se encontrou 2 lanes (ex: Mid Top)
-        if len(lane_parts) == 2:
-            main_lane = lane_parts[0]
-            sec_lane = lane_parts[1]
+        # Se encontrou 2 lanes (L2, L1)
+        if len(found_lane_parts) == 2:
+            # found_lane_parts[0] = L2 (TOP), found_lane_parts[1] = L1 (MID)
+            main_lane = found_lane_parts[1] # L1 deve ser a Main
+            sec_lane = found_lane_parts[0]  # L2 deve ser a Sec
             riot_id = " ".join(parts[:-2]).strip()
-        # Se encontrou 1 lane (ex: Mid)
-        elif len(lane_parts) == 1:
-            main_lane = lane_parts[0]
+        # Se encontrou 1 lane (L2 ou L1, deve ser L2)
+        elif len(found_lane_parts) == 1:
+            main_lane = found_lane_parts[0]
             sec_lane = None
             riot_id = " ".join(parts[:-1]).strip()
         # Se não encontrou nenhuma lane (o Nick#TAG foi o último ou único argumento)
         else:
-            # Caso em que o Nick#TAG é o único argumento (parts tem 1 elemento)
-            # O código cai aqui quando o usuário não coloca a lane.
-            
             # 4. VALIDAÇÃO MÍNIMA CORRETA
             await ctx.reply("❌ Você precisa informar pelo menos Nick#TAG e a lane principal.")
             return
 
         # ---------------------------------------------------------
 
-        # 5. Checagem de formato final da TAG (linha 125, onde o erro ocorria)
+        # 5. Checagem de formato final da TAG
         if "#" not in riot_id:
             await ctx.reply("❌ O Nick deve ter a TAG. Ex: `Nome#BR1`")
             return
 
-        # 6. Checagem de lane (Deve sempre ser TRUE se len(lane_parts) > 0)
+        # 6. Limpeza e Finalização do Dicionário
         m_lane_clean = self.clean_lane(main_lane)
         s_lane_clean = self.clean_lane(sec_lane) if sec_lane else None
 
         if not m_lane_clean:
-            # Este erro é redundante devido ao check de len(lane_parts), mas mantido para segurança.
+            # Checagem de segurança (redundante)
             await ctx.reply("❌ Lane principal inválida! Use: Top, Jungle, Mid, Adc ou Sup.")
             return
+
+        # Dicionário de Lanes final (L1 -> Main, L2 -> Sec)
+        lanes_data = {'main': m_lane_clean, 'sec': s_lane_clean}
+
 
         msg_wait = await ctx.reply("⏳ Buscando conta na Riot...")
 
@@ -203,7 +205,7 @@ class Auth(commands.Cog):
                 puuid=account_data['puuid'],
                 target_icon_id=target_icon_id,
                 account_data=account_data,
-                lanes={'main': m_lane_clean, 'sec': s_lane_clean}
+                lanes=lanes_data
             )
 
             await msg_wait.delete()
