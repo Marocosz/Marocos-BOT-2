@@ -66,6 +66,7 @@ class Auth(commands.Cog):
     def remove_invisible(self, text: str):
         if not text:
             return text
+        # Garantimos a limpeza de caracteres de formatação
         return "".join(
             c for c in text
             if unicodedata.category(c) != "Cf"
@@ -100,49 +101,64 @@ class Auth(commands.Cog):
             await ctx.reply(embed=embed)
             return
             
-        # --- PARSER NOVO (LIMPEZA IMEDIATA E PARSING ROBUSTO) ---
+        # 1. Limpeza Imediata da string completa
+        cleaned_full_args = self.remove_invisible(args).strip()
 
-        # 1. Limpar o argumento principal imediatamente para remover caracteres invisíveis/Unicode
-        cleaned_args = self.remove_invisible(args).strip()
-        parts = cleaned_args.split() 
-
-        # 2. VALIDAÇÃO MÍNIMA: Precisa de Nick#TAG E a Lane (mínimo de 2 partes)
-        if len(parts) < 2:
-            # CORREÇÃO: Esta checagem agora é precisa, garantindo que a mensagem correta seja exibida.
+        # --- PARSER POR POSIÇÃO (MAIS ROBUSTO CONTRA CARACTERES INVÁLIDOS) ---
+        
+        # 2. Encontrar a última parte que NÃO é uma lane
+        parts = cleaned_full_args.split() 
+        
+        # Inicia com as partes da lane como sendo as últimas da lista.
+        lane_parts = []
+        
+        # Verifica a última e a penúltima parte para ver se são lanes válidas.
+        if len(parts) >= 1:
+            # Tenta pegar a última como Main Lane
+            main_lane_input = parts[-1]
+            if self.clean_lane(main_lane_input):
+                lane_parts.append(main_lane_input)
+                
+                if len(parts) >= 2:
+                    # Tenta pegar a penúltima como Sec Lane
+                    sec_lane_input = parts[-2]
+                    if self.clean_lane(sec_lane_input):
+                        lane_parts.append(sec_lane_input)
+        
+        # 3. Mapeamento das Lanes e Riot ID
+        
+        # Se encontrou 2 lanes (ex: Mid Top)
+        if len(lane_parts) == 2:
+            main_lane = lane_parts[0]
+            sec_lane = lane_parts[1]
+            riot_id = " ".join(parts[:-2]).strip()
+        # Se encontrou 1 lane (ex: Mid)
+        elif len(lane_parts) == 1:
+            main_lane = lane_parts[0]
+            sec_lane = None
+            riot_id = " ".join(parts[:-1]).strip()
+        # Se não encontrou nenhuma lane (o Nick#TAG foi o último ou único argumento)
+        else:
+            # Caso em que o Nick#TAG é o único argumento (parts tem 1 elemento)
+            # O código cai aqui quando o usuário não coloca a lane.
+            
+            # 4. VALIDAÇÃO MÍNIMA CORRETA
             await ctx.reply("❌ Você precisa informar pelo menos Nick#TAG e a lane principal.")
             return
 
-        # 3. Restante do Parsing (Agora que temos certeza de ter pelo menos 2 partes)
-
-        main_lane_input = parts[-1]
-        
-        sec_lane_input = None
-        riot_id_parts = parts[:-1]
-
-        if len(riot_id_parts) > 0:
-            # Verifica se a penúltima parte (última de riot_id_parts) é uma lane
-            possible_sec_lane = riot_id_parts[-1]
-            if self.clean_lane(possible_sec_lane):
-                sec_lane_input = possible_sec_lane
-                # Se encontrou Sec Lane, remove ela das partes do Riot ID
-                riot_id_parts = riot_id_parts[:-1]
-        
-        # 4. O que sobrou é o Riot ID (Nome + TAG)
-        riot_id = " ".join(riot_id_parts).strip()
-
         # ---------------------------------------------------------
 
-        # 5. Checagem de formato final
+        # 5. Checagem de formato final da TAG (linha 125, onde o erro ocorria)
         if "#" not in riot_id:
             await ctx.reply("❌ O Nick deve ter a TAG. Ex: `Nome#BR1`")
             return
 
-        # Limpeza das lanes
-        m_lane_clean = self.clean_lane(main_lane_input)
-        s_lane_clean = self.clean_lane(sec_lane_input)
+        # 6. Checagem de lane (Deve sempre ser TRUE se len(lane_parts) > 0)
+        m_lane_clean = self.clean_lane(main_lane)
+        s_lane_clean = self.clean_lane(sec_lane) if sec_lane else None
 
         if not m_lane_clean:
-            # Essa checagem só deve falhar se o usuário colocou algo inválido como última palavra
+            # Este erro é redundante devido ao check de len(lane_parts), mas mantido para segurança.
             await ctx.reply("❌ Lane principal inválida! Use: Top, Jungle, Mid, Adc ou Sup.")
             return
 
