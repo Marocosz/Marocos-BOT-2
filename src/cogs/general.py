@@ -288,14 +288,21 @@ class HelpSelect(discord.ui.Select):
                     "• **`.config_aviso #canal`**: Define o canal para alertas de Promoção/Queda.\n"
                     "• **`.forcar_check`**: Inicia a verificação de Elo imediatamente.\n"
                     "• **`.fake_elo @user TIER RANK [FILA]`**: Força um Elo no DB para testes de aviso. "
-                    "*(Ex: `.fake_elo @Marcos GOLD I SOLO`)*\n"
-                    "\n"
+                    "*(Ex: `.fake_elo @Marcos GOLD I SOLO`)*"
+                ),
+                inline=False
+            )
+            
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            
+            embed.add_field(
+                name="➕Extras",
+                value=(
                     "**`.clear`**: Apaga todas as mensagens do bot no determinado chat de conversa.\n"
                     "**`.clear_all`**: Apaga todas as mensagens do chat de conversa."
                 ),
                 inline=False
             )
-
 
             embed.set_footer(text="Apenas usuários com permissão de Administrador podem usar.")
 
