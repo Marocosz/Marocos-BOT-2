@@ -239,7 +239,7 @@ class HelpSelect(discord.ui.Select):
             )
             
             # --- NOVO: ENQUETES MVP/iMVP ---
-            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
             
             embed.add_field(
                 name="5️⃣ Votação Pós-Jogo",
@@ -280,7 +280,7 @@ class HelpSelect(discord.ui.Select):
                 inline=False
             )
             
-            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             embed.add_field(
                 name="🚨 Rastreamento de Elo (Tracking)",
@@ -288,7 +288,10 @@ class HelpSelect(discord.ui.Select):
                     "• **`.config_aviso #canal`**: Define o canal para alertas de Promoção/Queda.\n"
                     "• **`.forcar_check`**: Inicia a verificação de Elo imediatamente.\n"
                     "• **`.fake_elo @user TIER RANK [FILA]`**: Força um Elo no DB para testes de aviso. "
-                    "*(Ex: `.fake_elo @Marcos GOLD I SOLO`)*"
+                    "*(Ex: `.fake_elo @Marcos GOLD I SOLO`)*\n"
+                    "\n"
+                    "**`.clear`**: Apaga todas as mensagens do bot no determinado chat de conversa.\n"
+                    "**`.clear_all`**: Apaga todas as mensagens do chat de conversa."
                 ),
                 inline=False
             )

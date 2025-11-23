@@ -159,7 +159,7 @@ class DraftView(discord.ui.View):
 
         embed.add_field(name=f"🔵 Time Azul (Cap. {self.cap_blue['name']})", value=fmt(self.team_blue), inline=True)
         embed.add_field(name=f"🔴 Time Vermelho (Cap. {self.cap_red['name']})", value=fmt(self.team_red), inline=True)
-        embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
         # ID DA PARTIDA EM DESTAQUE AQUI
         embed.add_field(name="📢 Instruções", value=f"ID: **{match_id}**\n`.resultado {match_id} Blue/Red`", inline=False)
         
@@ -269,7 +269,7 @@ class BalancedSideSelectView(discord.ui.View):
 
         embed.add_field(name=f"🔵 Time Azul (Cap. {cap_blue_name})", value=fmt(blue_team), inline=True)
         embed.add_field(name=f"🔴 Time Vermelho (Cap. {cap_red_name})", value=fmt(red_team), inline=True)
-        embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
         # ID DA PARTIDA EM DESTAQUE AQUI
         embed.add_field(name="📢 Instruções", value=f"ID: **{match_id}**\n`.resultado {match_id} Blue/Red`", inline=False)
         
