@@ -410,8 +410,8 @@ class Lobby(commands.Cog):
         self.current_match_id = 0 
         
         # --- VARIÁVEIS DE DEBUG ---
-        self.DEBUG_QUEUE_LIMIT = 1 
-        self.DEBUG_FILL_ENABLE = True 
+        self.DEBUG_QUEUE_LIMIT = 10 
+        self.DEBUG_FILL_ENABLE = False 
         self.QUEUE_LIMIT = self.DEBUG_QUEUE_LIMIT 
         # -------------------------
         
