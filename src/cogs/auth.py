@@ -106,7 +106,7 @@ class Auth(commands.Cog):
         cleaned_args = self.remove_invisible(args).strip()
         parts = cleaned_args.split() 
 
-        # 2. VALIDAÇÃO CORRETA: Precisa de Nick#TAG E a Lane (mínimo de 2 partes)
+        # 2. VALIDAÇÃO MÍNIMA: Precisa de Nick#TAG E a Lane (mínimo de 2 partes)
         if len(parts) < 2:
             # CORREÇÃO: Esta checagem agora é precisa, garantindo que a mensagem correta seja exibida.
             await ctx.reply("❌ Você precisa informar pelo menos Nick#TAG e a lane principal.")
