@@ -161,7 +161,12 @@ class Auth(commands.Cog):
                 title="🛡️ Verificação de Segurança",
                 description=(
                     f"Para confirmar **{riot_id}**, troque seu ícone no LoL para o mesmo da imagem ao lado.\n"
-                    f"Depois clique no botão **Verificar**."
+                    f"Depois clique no botão **Verificar**.\n"
+                    f"\n"
+                    f"Esse ícone aleatório ajuda a garantir que você é o dono da conta.\n"
+                    f"**IMPORTANTE:** Após a verificação, você pode trocar o ícone de volta normalmente.\n"
+                    f"\n\n"
+                    f"Este ícone estará no final da sua lista de ícones dentro do lol."
                 ),
                 color=0xffcc00
             )
