@@ -16,21 +16,21 @@ class RankingTracking(commands.Cog):
     def cog_unload(self):
         self.check_ranks_loop.cancel()
 
-    # --- MENSAGENS ALEATÓRIAS ---
+    # --- MENSAGENS ALEATÓRIAS (CORRIGIDAS) ---
     promotions = [
-        "🚀 **{user}** acabou de subir para **{tier} {rank}**! Ninguém segura!",
-        "🎉 Parabéns **{user}**! Alcançou **{tier} {rank}**. O topo é o limite.",
-        "🔥 **{user}** está smurfando? Subiu para **{tier} {rank}**.",
-        "📈 **{user}** promoveu para **{tier} {rank}**. Respeita!",
-        "👑 **{user}** atingiu **{tier} {rank}**. Jogou muito!"
+        "🚀 **{user}** acabou de subir para **{tier} {rank} ({queue})**! Ninguém segura!",
+        "🎉 Parabéns **{user}**! Alcançou **{tier} {rank} ({queue})**. O topo é o limite.",
+        "🔥 **{user}** está smurfando? Subiu para **{tier} {rank} ({queue})**.",
+        "📈 **{user}** promoveu para **{tier} {rank} ({queue})**. Respeita!",
+        "👑 **{user}** atingiu **{tier} {rank} ({queue})**. Jogou muito!"
     ]
 
     demotions = [
-        "📉 **{user}** caiu para **{tier} {rank}**. F no chat.",
-        "💀 **{user}** foi rebaixado para **{tier} {rank}**. A SoloQ não perdoa.",
-        "⚠️ **{user}** demoveu para **{tier} {rank}**. Hora de rever o replay.",
-        "😭 **{user}** caiu para **{tier} {rank}**. Voltaremos mais fortes.",
-        "📉 Alerta de queda! **{user}** agora é **{tier} {rank}**."
+        "📉 **{user}** caiu para **{tier} {rank} ({queue})**. F no chat.",
+        "💀 **{user}** foi rebaixado para **{tier} {rank} ({queue})**. A SoloQ não perdoa.",
+        "⚠️ **{user}** demoveu para **{tier} {rank} ({queue})**. Hora de rever o replay.",
+        "😭 **{user}** caiu para **{tier} {rank} ({queue})**. Voltaremos mais fortes.",
+        "📉 Alerta de queda! **{user}** agora é **{tier} {rank} ({queue})**."
     ]
 
     # --- LÓGICA DE COMPARAÇÃO ---
@@ -39,10 +39,8 @@ class RankingTracking(commands.Cog):
         t_val = {'IRON': 0, 'BRONZE': 10, 'SILVER': 20, 'GOLD': 30, 'PLATINUM': 40, 'EMERALD': 50, 'DIAMOND': 60, 'MASTER': 70, 'GRANDMASTER': 80, 'CHALLENGER': 90, 'UNRANKED': -1}
         r_val = {'IV': 0, 'III': 1, 'II': 2, 'I': 3, '': 0}
         
-        # Se for Mestre+ o Rank é ignorado, a pontuação é fixa no TIER_VALUE.
         if tier.upper() in ['MASTER', 'GRANDMASTER', 'CHALLENGER']:
-            # Master/GM/Challenger usam LP para diferenciacao, mas para promocao/democao, a mudanca de tier é o suficiente.
-            return t_val.get(tier.upper(), 0) + 1 # Adiciona um pequeno valor fixo para diferenciar de Diamond I
+            return t_val.get(tier.upper(), 0) + 1
         
         return t_val.get(tier.upper(), 0) + r_val.get(rank.upper(), 0)
 
@@ -98,6 +96,8 @@ class RankingTracking(commands.Cog):
                     current_tier = active_queue['tier']
                     current_rank = active_queue['rank']
                     
+                    queue_name = "Solo/Duo" if queue_type == 'RANKED_SOLO_5x5' else "Flex 5v5" # NOVO: Nome da Fila para formatação
+
                     # 3. Lógica de Promoção/Rebaixamento (Verifica apenas mudança de Tier ou Divisão)
 
                     # Se o banco está desatualizado (por exemplo, "UNRANKED" ou Elo antigo)
@@ -114,14 +114,14 @@ class RankingTracking(commands.Cog):
                         action = "promotions" if new_val > old_val else "demotions"
                         color = 0x2ecc71 if new_val > old_val else 0xe74c3c
                         
-                        queue_name = "Solo/Duo" if queue_type == 'RANKED_SOLO_5x5' else "Flex 5v5"
-                        
+                        # ALTERAÇÃO AQUI: Passa TIER, RANK e o novo {queue} separadamente
                         msg = random.choice(getattr(self, action)).format(
                             user=f"<@{p.discord_id}>", 
-                            tier=f"{current_tier} ({queue_name})", 
-                            rank=current_rank
+                            tier=current_tier, 
+                            rank=current_rank,
+                            queue=queue_name
                         )
-                        embed = discord.Embed(description=msg, color=color)
+                        embed = discord.Embed(description=msg, color=color) # Verde
                         await channel.send(embed=embed)
                         
                         # Atualiza DB
@@ -129,9 +129,9 @@ class RankingTracking(commands.Cog):
                             p.discord_id, current_tier, current_rank, active_queue['leaguePoints'], 
                             active_queue['wins'], active_queue['losses'], p.mmr, queue_type=queue_type
                         )
-                    
-                    # Se o elo não mudou (new_val == old_val), mas os dados (LP/Wins/Losses) podem ter mudado
-                    else:
+
+                    elif new_val == old_val:
+                         # Se o elo não mudou, mas os dados (LP/Wins/Losses) podem ter mudado
                          await PlayerRepository.update_riot_rank(
                             p.discord_id, current_tier, current_rank, active_queue['leaguePoints'], 
                             active_queue['wins'], active_queue['losses'], p.mmr, queue_type=queue_type
@@ -168,7 +168,7 @@ class RankingTracking(commands.Cog):
             tier=tier.upper(),
             rank=rank.upper(),
             lp=0, wins=0, losses=0, calculated_mmr=player.mmr,
-            queue_type=queue_type
+            queue_type=queue_type # Passa o tipo de fila
         )
         
         await ctx.reply(f"🕵️ **Modo Teste:** O Elo {fila.upper()} de {jogador.display_name} no banco agora é **{tier} {rank}**.\n⏳ Aguarde o loop automático (ou force o check) para ver o aviso de mudança.")
