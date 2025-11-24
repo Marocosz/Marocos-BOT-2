@@ -49,13 +49,14 @@ class Community(commands.Cog):
         xp_gain = random.randint(15, 25)
         has_media = len(message.attachments) > 0
         
+        # Salva no banco (add_xp cria o perfil se não existir)
         leveled_up, new_level = await CommunityRepository.add_xp(message.author.id, xp_gain, has_media)
         self.xp_cooldown[message.author.id] = datetime.utcnow()
 
         if leveled_up:
             await message.add_reaction("🆙")
 
-    # --- EVENTO DE VOZ (NOVO) ---
+    # --- EVENTO DE VOZ ---
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         """Engine de Ganho de XP por Voz"""
@@ -78,20 +79,17 @@ class Community(commands.Cog):
                 minutes = int(duration.total_seconds() / 60)
                 
                 if minutes >= 1: # Mínimo 1 minuto para ganhar XP
-                    # Cálculo: 10 XP por minuto falado (ajuste como quiser)
+                    # Cálculo: 10 XP por minuto falado
                     xp_earned = minutes * 10 
                     
                     leveled_up, new_lvl = await CommunityRepository.add_xp(member.id, xp_earned, has_media=False)
                     print(f"[Voice XP] {member.name} ganhou {xp_earned} XP por {minutes} minutos em call.")
-                    
-                    # Opcional: Mandar DM ou aviso se upar de nível por voz (pode ser irritante, deixei off)
 
         # 3. Mudou de status (Mutou/Desmutou no meio da call)
         elif before.channel is not None and after.channel is not None:
             # Se o usuário se mutou/ensurdeceu agora: Para de contar
             if not before.self_mute and after.self_mute:
                 if member.id in self.voice_sessions:
-                    # Calcula o que ganhou até agora e remove da sessão
                     start_time = self.voice_sessions.pop(member.id)
                     duration = datetime.utcnow() - start_time
                     minutes = int(duration.total_seconds() / 60)
@@ -121,12 +119,18 @@ class Community(commands.Cog):
         """Exibe o Cartão de Comunidade do usuário"""
         target = member or ctx.author
         
+        # Busca dados no Banco
         profile = await CommunityRepository.get_profile(target.id)
         
+        # --- CORREÇÃO: CRIA PERFIL SE NÃO EXISTIR ---
         if not profile:
-            await ctx.reply("📭 Este usuário ainda não possui registro social (precisa interagir no servidor).")
-            return
+            # Adiciona 0 de XP para forçar a criação do registro no banco
+            await CommunityRepository.add_xp(target.id, 0)
+            # Busca novamente agora que o registro existe
+            profile = await CommunityRepository.get_profile(target.id)
+        # --------------------------------------------
 
+        # Busca Posição no Ranking
         rank_pos = await CommunityRepository.get_ranking_position(target.id)
         
         status_color = {
@@ -160,6 +164,9 @@ class Community(commands.Cog):
         top_role = target.top_role.mention if target.top_role.name != "@everyone" else "Sem Cargo"
         joined_at = f"<t:{int(target.joined_at.timestamp())}:R>" if target.joined_at else "N/A"
         created_at = f"<t:{int(target.created_at.timestamp())}:D>"
+        
+        # Se o usuário acabou de ser criado, last_message_at pode ser None ou igual a joined_at
+        # A função get_activity_status lida com None, mas aqui garantimos que funcione
         activity_status = self.get_activity_status(profile.last_message_at)
 
         info_text = (
@@ -169,7 +176,7 @@ class Community(commands.Cog):
             f"📡 **Status:** {activity_status}"
         )
         embed.add_field(name="🆔 Identidade", value=info_text, inline=True)
-        embed.set_footer(text="Ganhe XP conversando e participando de Calls!")
+        embed.set_footer(text="Mande mensagens para ganhar XP • Imagens dão bônus!")
         
         view = BaseInteractiveView(timeout=60)
         view.message = await ctx.reply(embed=embed, view=view)
