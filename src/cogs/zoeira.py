@@ -7,7 +7,7 @@ class Zoeira(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.TONHAO_NAME = "Tonhão Calabresa"
-        self.TORRES_MENTION = "<@123456789012345678>" 
+        self.TORRES_MENTION = "<@410171778971992085>" 
 
         # Lista de mensagens estruturadas (Target: None para não marcar)
         self.insults = [
