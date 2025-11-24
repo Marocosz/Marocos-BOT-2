@@ -7,7 +7,7 @@ class Zoeira(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.TONHAO_NAME = "Tonhão Calabresa"
-        self.TORRES_MENTION = "<410171778971992085>" # O ID de menção customizado solicitado. Corrigido para formato de menção de ID!
+        self.TORRES_MENTION = "<@123456789012345678>" 
 
         # Lista de mensagens estruturadas (Target: None para não marcar)
         self.insults = [
@@ -17,7 +17,6 @@ class Zoeira(commands.Cog):
             {'target': self.TONHAO_NAME, 'text': f"{self.TONHAO_NAME}, se incompetência fosse crime, você estaria cumprindo três prisões perpétuas e ainda devendo cadeia.", 'tag': None},
             {'target': self.TONHAO_NAME, 'text': f"{self.TONHAO_NAME}, tomar no cu perto de você seria um upgrade de caráter, porque hoje você só serve como exemplo do que não ser na vida.", 'tag': None},
 
-            # MENSAGEM DO TORRES (a única que marca)
             {'target': 'Torres', 'text': "Torres, você é tão fofuxo, o meu salame boyzinho, lindinho.", 'tag': self.TORRES_MENTION}
         ]
 
