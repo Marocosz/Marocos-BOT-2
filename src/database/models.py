@@ -121,6 +121,9 @@ class CommunityProfile(Base):
     messages_sent = Column(Integer, default=0)
     media_sent = Column(Integer, default=0) # Fotos/Arquivos
     
+    # NOVO: Rastreamento de Tempo de Voz Real
+    voice_minutes = Column(Integer, default=0) 
+
     # Metadados
     last_message_at = Column(DateTime, default=datetime.utcnow)
     joined_at = Column(DateTime, default=datetime.utcnow) # Quando começou a usar o bot

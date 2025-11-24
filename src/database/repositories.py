@@ -164,7 +164,6 @@ class MatchRepository:
                 'red_team': red_team
             }
 
-
     @staticmethod
     async def finish_match(match_id: int, winning_side: str):
         side_enum = TeamSide.BLUE if winning_side.upper() == 'BLUE' else TeamSide.RED
@@ -217,44 +216,48 @@ class MatchRepository:
 class CommunityRepository:
     
     @staticmethod
-    async def add_xp(discord_id: int, xp_amount: int, has_media: bool = False):
-        """Adiciona XP, contagem de mensagens e sobe de nível se necessário"""
+    async def add_xp(discord_id: int, xp_amount: int, has_media: bool = False, voice_minutes: int = 0):
+        """Adiciona XP e tempo de voz, sobe de nível se necessário"""
         async with get_session() as session:
             stmt = select(CommunityProfile).where(CommunityProfile.discord_id == discord_id)
             result = await session.execute(stmt)
             profile = result.scalar_one_or_none()
 
             if not profile:
-                # CORREÇÃO: Inicializa explicitamente todos os campos com 0 ou valor padrão
+                # Inicializa com 0 para evitar problemas de soma
                 profile = CommunityProfile(
                     discord_id=discord_id, 
                     joined_at=datetime.utcnow(),
-                    xp=0,
-                    level=1,
-                    messages_sent=0,
-                    media_sent=0
+                    xp=0, level=1, messages_sent=0, media_sent=0, voice_minutes=0
                 )
                 session.add(profile)
             
-            # Safety Check para dados legados corrompidos (Null no banco)
+            # Tratamento de Nulos (Legado)
             if profile.messages_sent is None: profile.messages_sent = 0
             if profile.xp is None: profile.xp = 0
             if profile.media_sent is None: profile.media_sent = 0
             if profile.level is None: profile.level = 1
+            if profile.voice_minutes is None: profile.voice_minutes = 0
             
             # Atualiza Stats
-            profile.messages_sent += 1
+            # Se for mensagem de texto (xp > 0 e não é voz pura), incrementa contadores
+            if xp_amount > 0 and voice_minutes == 0:
+                profile.messages_sent += 1
+                if has_media:
+                    profile.media_sent += 1
+            
             profile.xp += xp_amount
+            
+            if voice_minutes > 0:
+                profile.voice_minutes += voice_minutes
+                
             profile.last_message_at = datetime.utcnow()
-            if has_media:
-                profile.media_sent += 1
 
             # Lógica Simples de Level Up
             xp_needed = int(profile.level * 100 * 1.2)
-            
             leveled_up = False
             if profile.xp >= xp_needed:
-                profile.xp -= xp_needed # Reseta a barra para o próximo nível
+                profile.xp -= xp_needed
                 profile.level += 1
                 leveled_up = True
             
@@ -274,8 +277,20 @@ class CommunityRepository:
             stmt = select(CommunityProfile.discord_id).order_by(desc(CommunityProfile.level), desc(CommunityProfile.xp))
             result = await session.execute(stmt)
             ids = result.scalars().all()
-            
             try:
                 return ids.index(discord_id) + 1
             except ValueError:
                 return 0
+
+    # --- NOVO MÉTODO: TOP 10 ---
+    @staticmethod
+    async def get_top_xp(limit: int = 10):
+        """Retorna a lista dos top usuários por Nível e XP"""
+        async with get_session() as session:
+            stmt = (
+                select(CommunityProfile)
+                .order_by(desc(CommunityProfile.level), desc(CommunityProfile.xp))
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
