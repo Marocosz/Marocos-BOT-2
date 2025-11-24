@@ -136,8 +136,15 @@ class Community(commands.Cog):
         # --- CÁLCULOS ---
         xp_next_level = int(profile.level * 100 * 1.2)
         
-        # XP dentro do nível atual
-        # Nota: Sua lógica de resetar XP ao upar torna profile.xp o valor correto dentro do nível
+        # XP dentro do nível atual (para a barra não ficar cheia sempre)
+        xp_current_level_start = int((profile.level - 1) * 100 * 1.2) if profile.level > 1 else 0
+        xp_in_level = profile.xp - xp_current_level_start
+        
+        # Ajuste visual para barra não quebrar se a matemática de nível mudar no futuro
+        if xp_in_level < 0: xp_in_level = 0
+        
+        # Nota: Como sua lógica de add_xp reseta o XP a cada nível (profile.xp -= needed), 
+        # profile.xp já é o XP dentro do nível. Então usamos profile.xp direto.
         progress_bar = self.generate_progress_bar(profile.xp, xp_next_level)
 
         # Cálculo de Tempo de Voz Real do Banco
@@ -186,7 +193,7 @@ class Community(commands.Cog):
         
         # Roles (Exibir os 3 principais)
         roles = [r.mention for r in target.roles if r.name != "@everyone"]
-        roles.reverse() 
+        roles.reverse() # Ordem decrescente (maior cargo primeiro)
         roles_str = " ".join(roles[:3]) if roles else "Sem cargos"
         if len(roles) > 3: roles_str += f" (+{len(roles)-3})"
 

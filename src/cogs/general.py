@@ -4,7 +4,7 @@ from src.utils.views import BaseInteractiveView
 
 # --- BOTÃO DE FECHAR ---
 class CloseButton(discord.ui.Button):
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int): 
         super().__init__(label="Fechar Painel", style=discord.ButtonStyle.secondary, emoji="❌", row=1)
         self.user_id = user_id
 
@@ -23,6 +23,7 @@ class HelpSelect(discord.ui.Select):
         options = [
             discord.SelectOption(label="Início", description="Visão geral do sistema.", emoji="🏠", value="home"),
             discord.SelectOption(label="Comandos de Jogador", description="Registro, Perfil, Histórico, MMR.", emoji="👤", value="player"),
+            discord.SelectOption(label="Comunidade & XP", description="Perfil Social, Ranking de XP e Níveis.", emoji="✨", value="community"), # NOVO ITEM
             discord.SelectOption(label="Ferramentas de Meta", description="Builds, Tier Lists, Patch Notes.", emoji="🛠️", value="utils"),
             discord.SelectOption(label="Sistema da Liga Interna", description="Como funciona a Fila, Capitães e Draft.", emoji="🏆", value="lobby"),
             discord.SelectOption(label="Painel Admin", description="Comandos para organizadores.", emoji="🛡️", value="admin"),
@@ -39,8 +40,6 @@ class HelpSelect(discord.ui.Select):
 
         value = self.values[0]
         
-        # [Lógica de construção de embed omitida]
-
         if value == "home":
             embed = discord.Embed(title="🤖 Bem-vindo ao MarocosBot!", color=0x2b2d31)
             embed.description = (
@@ -117,6 +116,43 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(
                 name="🔴 `.live`",
                 value="Espião: Verifica se você (ou alguém) está em partida agora e gera link do Spectator.",
+                inline=False
+            )
+        
+        # --- NOVA SEÇÃO: COMUNIDADE ---
+        elif value == "community":
+            embed = discord.Embed(title="✨ Comunidade & Níveis", color=0xf1c40f)
+            embed.description = "Sistema de XP e interação social do servidor."
+            
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            
+            embed.add_field(
+                name="💳 `.social [@usuario]`",
+                value=(
+                    "Exibe o **Cartão de Membro** com:\n"
+                    "• Nível e Barra de XP\n"
+                    "• Estatísticas de Mensagens e Voz\n"
+                    "• Status de Atividade"
+                ),
+                inline=False
+            )
+            
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            
+            embed.add_field(
+                name="🏆 `.ranking_xp`",
+                value="Mostra o **Top 10 Membros** mais ativos do servidor.",
+                inline=False
+            )
+            
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            
+            embed.add_field(
+                name="⭐ Como ganhar XP?",
+                value=(
+                    "• **Texto:** Mande mensagens no chat (Cooldown de 5s).\n"
+                    "• **Voz:** Entre em canais de voz. Ganhe XP ao sair (10 XP/min)."
+                ),
                 inline=False
             )
 
@@ -279,7 +315,7 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(name="\u200b", value="\u200b", inline=False)
             
             embed.add_field(
-                name="➕Extras",
+                name="➕ Extras",
                 value=(
                     "**`.clear`**: Apaga todas as mensagens do bot no determinado chat de conversa.\n"
                     "**`.clear_all`**: Apaga todas as mensagens do chat de conversa."
@@ -290,21 +326,20 @@ class HelpSelect(discord.ui.Select):
             embed.set_footer(text="Apenas usuários com permissão de Administrador podem usar.")
 
         # Recria o view para resetar o Select Menu ao placeholder
-        # Adiciona o botão de fechar
         new_view = HelpView(self.bot, self.user_id)
         
-        # MUDANÇA CRUCIAL: Captura a referência da mensagem da View mãe
+        # Captura a referência da mensagem da View mãe
         if isinstance(self.view, HelpView):
             new_view.message = self.view.message
         
         await interaction.response.edit_message(embed=embed, view=new_view)
 
 class HelpView(BaseInteractiveView):
-    def __init__(self, bot, user_id: int): # Adicionado user_id
+    def __init__(self, bot, user_id: int): 
         super().__init__(timeout=120)
-        self.user_id = user_id # Guarda user_id
-        self.add_item(HelpSelect(bot, user_id)) # Passa user_id
-        self.add_item(CloseButton(user_id)) # Passa user_id
+        self.user_id = user_id 
+        self.add_item(HelpSelect(bot, user_id)) 
+        self.add_item(CloseButton(user_id)) 
 
 class General(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -320,10 +355,9 @@ class General(commands.Cog):
         )
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         
-        view = HelpView(self.bot, ctx.author.id) # Passa o ID do autor
-        sent_message = await ctx.send(embed=embed, view=view) # Captura a mensagem enviada
-        view.message = sent_message # <--- ATRIBUI A REFERÊNCIA DA MENSAGEM para o on_timeout
-        
+        view = HelpView(self.bot, ctx.author.id)
+        sent_message = await ctx.send(embed=embed, view=view)
+        view.message = sent_message
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(General(bot))
