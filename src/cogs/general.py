@@ -4,13 +4,13 @@ from src.utils.views import BaseInteractiveView
 
 # --- BOTÃO DE FECHAR ---
 class CloseButton(discord.ui.Button):
-    def __init__(self, user_id: int): # Adicionado user_id
+    def __init__(self, user_id: int):
         super().__init__(label="Fechar Painel", style=discord.ButtonStyle.secondary, emoji="❌", row=1)
         self.user_id = user_id
 
     async def callback(self, interaction: discord.Interaction):
         # Apenas quem invocou o comando pode fechar
-        if interaction.user.id != self.user_id: # Checagem simplificada
+        if interaction.user.id != self.user_id:
             await interaction.response.send_message("Apenas o autor do comando pode fechar este painel.", ephemeral=True)
             return
 
@@ -19,48 +19,30 @@ class CloseButton(discord.ui.Button):
         
 # --- MENU DE NAVEGAÇÃO ---
 class HelpSelect(discord.ui.Select):
-    def __init__(self, bot, user_id: int): # Adicionado user_id
+    def __init__(self, bot, user_id: int):
         options = [
-            discord.SelectOption(
-                label="Início", 
-                description="Visão geral do sistema.", 
-                emoji="🏠", value="home"
-            ),
-            discord.SelectOption(
-                label="Comandos de Jogador", 
-                description="Registro, Perfil, Histórico, MMR.", 
-                emoji="👤", value="player"
-            ),
-            discord.SelectOption(
-                label="Ferramentas de Meta", 
-                description="Builds, Tier Lists, Patch Notes.", 
-                emoji="🛠️", value="utils"
-            ),
-            discord.SelectOption(
-                label="Sistema da Liga Interna", 
-                description="Como funciona a Fila, Capitães e Draft.", 
-                emoji="🏆", value="lobby"
-            ),
-            discord.SelectOption(
-                label="Painel Admin", 
-                description="Comandos para organizadores.", 
-                emoji="🛡️", value="admin"
-            ),
+            discord.SelectOption(label="Início", description="Visão geral do sistema.", emoji="🏠", value="home"),
+            discord.SelectOption(label="Comandos de Jogador", description="Registro, Perfil, Histórico, MMR.", emoji="👤", value="player"),
+            discord.SelectOption(label="Ferramentas de Meta", description="Builds, Tier Lists, Patch Notes.", emoji="🛠️", value="utils"),
+            discord.SelectOption(label="Sistema da Liga Interna", description="Como funciona a Fila, Capitães e Draft.", emoji="🏆", value="lobby"),
+            discord.SelectOption(label="Painel Admin", description="Comandos para organizadores.", emoji="🛡️", value="admin"),
         ]
         super().__init__(placeholder="📚 Navegue pelo Manual da Liga...", min_values=1, max_values=1, options=options, row=0)
         self.bot = bot
-        self.user_id = user_id # Guarda o user_id
+        self.user_id = user_id
 
     async def callback(self, interaction: discord.Interaction):
         # Impedir que outro usuário use o Select Menu
-        if interaction.user.id != self.user_id: # Checagem simplificada
+        if interaction.user.id != self.user_id:
             await interaction.response.send_message("Apenas o autor do comando pode navegar no menu de ajuda.", ephemeral=True)
             return
 
         value = self.values[0]
         
+        # [Lógica de construção de embed omitida]
+
         if value == "home":
-            embed = discord.Embed(title="🤖 Bem-vindo ao MarcosBot!", color=0x2b2d31)
+            embed = discord.Embed(title="🤖 Bem-vindo ao MarocosBot!", color=0x2b2d31)
             embed.description = (
                 "Eu sou o sistema oficial da **Liga Interna** e assistente de LoL deste servidor.\n\n"
                 "Minha função é organizar partidas competitivas justas, calcular seu **MMR Real** "
@@ -240,7 +222,7 @@ class HelpSelect(discord.ui.Select):
             )
             
             # --- NOVO: ENQUETES MVP/iMVP ---
-            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
             
             embed.add_field(
                 name="5️⃣ Votação Pós-Jogo",
@@ -281,7 +263,7 @@ class HelpSelect(discord.ui.Select):
                 inline=False
             )
             
-            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
 
             embed.add_field(
                 name="🚨 Rastreamento de Elo (Tracking)",
@@ -309,7 +291,12 @@ class HelpSelect(discord.ui.Select):
 
         # Recria o view para resetar o Select Menu ao placeholder
         # Adiciona o botão de fechar
-        new_view = HelpView(self.bot, self.user_id) # <-- Deve usar self.user_id
+        new_view = HelpView(self.bot, self.user_id)
+        
+        # MUDANÇA CRUCIAL: Captura a referência da mensagem da View mãe
+        if isinstance(self.view, HelpView):
+            new_view.message = self.view.message
+        
         await interaction.response.edit_message(embed=embed, view=new_view)
 
 class HelpView(BaseInteractiveView):
@@ -334,7 +321,9 @@ class General(commands.Cog):
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         
         view = HelpView(self.bot, ctx.author.id) # Passa o ID do autor
-        await ctx.send(embed=embed, view=view)
+        sent_message = await ctx.send(embed=embed, view=view) # Captura a mensagem enviada
+        view.message = sent_message # <--- ATRIBUI A REFERÊNCIA DA MENSAGEM para o on_timeout
+        
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(General(bot))
