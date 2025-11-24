@@ -14,18 +14,18 @@ class Community(commands.Cog):
         # Dicionário para rastrear tempo de voz: {user_id: datetime_entrada}
         self.voice_sessions = {}
 
-    def generate_progress_bar(self, current, total, length=20): # Aumentado para 20 blocos
+    def generate_progress_bar(self, current, total, length=18): # Aumentei para 18 para ficar largo mas caber no celular
         """Gera uma barra visual estilo Gamer"""
         if total == 0: total = 1
         percent = min(1.0, current / total)
         filled = int(length * percent)
         # Caracteres de bloco para barra mais bonita
         bar = "█" * filled + "░" * (length - filled) 
-        return f"`{bar}` **{int(percent * 100)}%**"
+        return f"{bar}"
 
     def get_activity_status(self, last_msg_time):
         """Define o 'título' de atividade do usuário com emojis"""
-        if not last_msg_time: return "👻 **Fantasma** (Inativo)"
+        if not last_msg_time: return "👻 **Fantasma**"
         
         diff = datetime.utcnow() - last_msg_time
         
@@ -104,7 +104,7 @@ class Community(commands.Cog):
                 if member.voice and not member.voice.self_mute and not member.voice.self_deaf and not member.bot:
                      self.voice_sessions[member.id] = datetime.utcnow()
 
-    # --- COMANDO SOCIAL (DESIGN PREMIUM) ---
+    # --- COMANDO SOCIAL (DESIGN PREMIUM REVISADO) ---
     @commands.command(name="social", aliases=["perfil_social", "rank", "comunidade"])
     async def social_profile(self, ctx, member: discord.Member = None):
         """Exibe o Cartão de Comunidade do usuário"""
@@ -121,90 +121,77 @@ class Community(commands.Cog):
         
         # Cores dinâmicas
         status_color = {
-            discord.Status.online: 0x43b581, # Verde Discord
-            discord.Status.idle: 0xfaa61a,   # Amarelo
-            discord.Status.dnd: 0xf04747,    # Vermelho
-            discord.Status.offline: 0x747f8d # Cinza
+            discord.Status.online: 0x43b581,
+            discord.Status.idle: 0xfaa61a,
+            discord.Status.dnd: 0xf04747,
+            discord.Status.offline: 0x747f8d
         }.get(target.status, 0x2b2d31)
 
-        # Criação do Embed Maior e Mais Bonito
-        embed = discord.Embed(title=f"🛡️ Cartão de Membro: {target.display_name}", color=status_color)
-        
-        # Thumbnail Grande no topo à direita
+        embed = discord.Embed(color=status_color)
+        embed.set_author(name=f"Perfil da Comunidade: {target.display_name}", icon_url=target.display_avatar.url)
         embed.set_thumbnail(url=target.display_avatar.url)
 
         # --- CÁLCULOS ---
         xp_next_level = int(profile.level * 100 * 1.2)
-        
-        # XP dentro do nível atual (para a barra não ficar cheia sempre)
-        xp_current_level_start = int((profile.level - 1) * 100 * 1.2) if profile.level > 1 else 0
-        xp_in_level = profile.xp - xp_current_level_start
-        
-        # Ajuste visual para barra não quebrar se a matemática de nível mudar no futuro
-        if xp_in_level < 0: xp_in_level = 0
-        
-        # Nota: Como sua lógica de add_xp reseta o XP a cada nível (profile.xp -= needed), 
-        # profile.xp já é o XP dentro do nível. Então usamos profile.xp direto.
         progress_bar = self.generate_progress_bar(profile.xp, xp_next_level)
+        
+        # Porcentagem para exibição
+        if xp_next_level > 0:
+            percent_val = int((profile.xp / xp_next_level) * 100)
+        else:
+            percent_val = 100
 
-        # Cálculo de Tempo de Voz Real do Banco
+        # Formatação Bonita do Tempo
         hours = profile.voice_minutes // 60
         minutes = profile.voice_minutes % 60
-        
-        # Formatação Bonita do Tempo
-        if hours > 0:
-            voice_time_str = f"**{hours}**h **{minutes}**m"
-        else:
-            voice_time_str = f"**{minutes}** minutos"
+        voice_time_str = f"{hours}h {minutes}m"
 
-        # --- SEÇÃO 1: NÍVEL E PROGRESSO (Destacado) ---
+        # --- CAMPO 1: NÍVEL E BARRA (ESTILO CODE BLOCK INI) ---
+        # O bloco 'ini' deixa os colchetes coloridos em alguns temas
+        level_info = (
+            f"```ini\n"
+            f"[{progress_bar}] {percent_val}%\n"
+            f"[ XP Atual: {profile.xp} / {xp_next_level} ]\n"
+            f"```"
+        )
         embed.add_field(
             name=f"🏆 Nível {profile.level}",
-            value=f"{progress_bar}\nEXP Atual: `{profile.xp} / {xp_next_level}`",
+            value=level_info,
             inline=False
         )
 
-        # --- SEÇÃO 2: ESTATÍSTICAS PRINCIPAIS (Lado a Lado) ---
-        
-        # Coluna Esquerda: Chat e Mídia
-        chat_stats = (
-            f"💬 Mensagens: **{profile.messages_sent}**\n"
-            f"🖼️ Mídia Enviada: **{profile.media_sent}**\n"
+        # --- CAMPO 2: ESTATÍSTICAS GERAIS (ESTILO YAML) ---
+        # O bloco 'yaml' alinha o texto e cria a "caixa preta" que você queria
+        stats_block = (
+            f"```yaml\n"
+            f"Rank Global:   #{rank_pos}\n"
+            f"Tempo em Call: {voice_time_str}\n"
+            f"Mensagens:     {profile.messages_sent}\n"
+            f"Mídia Env.:    {profile.media_sent}\n"
+            f"```"
         )
-        embed.add_field(name="📝 Atividade de Texto", value=chat_stats, inline=True)
+        embed.add_field(name="📊 Estatísticas de Atividade", value=stats_block, inline=False)
 
-        # Coluna Direita: Voz e Ranking (Destaque ao Tempo de Voz)
-        voice_stats = (
-            f"🎙️ Tempo em Call: {voice_time_str}\n"
-            f"💎 Rank Global: **#{rank_pos}**"
-        )
-        embed.add_field(name="🔊 Atividade de Voz", value=voice_stats, inline=True)
-
-        # Separador Visual
-        embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
-
-        # --- SEÇÃO 3: METADADOS E STATUS ---
-        
-        # Datas formatadas
-        joined_at = f"<t:{int(target.joined_at.timestamp())}:R>" if target.joined_at else "N/A"
-        created_at = f"<t:{int(target.created_at.timestamp())}:d>"
+        # --- CAMPO 3: DADOS DA CONTA (SEM CODE BLOCK PARA DATAS FUNCIONAREM) ---
+        joined_at = f"<t:{int(target.joined_at.timestamp())}:D>" if target.joined_at else "N/A"
+        created_at = f"<t:{int(target.created_at.timestamp())}:D>"
         
         activity_status = self.get_activity_status(profile.last_message_at)
         
-        # Roles (Exibir os 3 principais)
+        # Roles (Top 3)
         roles = [r.mention for r in target.roles if r.name != "@everyone"]
-        roles.reverse() # Ordem decrescente (maior cargo primeiro)
+        roles.reverse() 
         roles_str = " ".join(roles[:3]) if roles else "Sem cargos"
         if len(roles) > 3: roles_str += f" (+{len(roles)-3})"
 
-        embed.add_field(name="📡 Status da Comunidade", value=activity_status, inline=True)
-        embed.add_field(name="🎭 Cargos", value=roles_str, inline=True)
+        embed.add_field(name="📅 Entrou em", value=joined_at, inline=True)
+        embed.add_field(name="🎂 Criou em", value=created_at, inline=True)
+        embed.add_field(name="📡 Status", value=activity_status, inline=True)
         
-        # Linha final com datas
-        embed.add_field(name="📅 Histórico", value=f"Entrou: {joined_at} • Criou: {created_at}", inline=False)
+        embed.add_field(name="🎭 Cargos", value=roles_str, inline=False)
 
-        # Footer limpo
-        embed.set_footer(text=f"ID: {target.id} • Continue interagindo para subir de nível!")
+        # Footer Limpo
+        embed.set_footer(text=f"ID do Usuário: {target.id}")
         
         view = BaseInteractiveView(timeout=60)
         view.message = await ctx.reply(embed=embed, view=view)
