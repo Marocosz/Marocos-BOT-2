@@ -14,7 +14,7 @@ class Community(commands.Cog):
         # Dicionário para rastrear tempo de voz: {user_id: datetime_entrada}
         self.voice_sessions = {}
 
-    def generate_progress_bar(self, current, total, length=20): 
+    def generate_progress_bar(self, current, total, length=21): 
         """Gera uma barra visual estilo Gamer (SEM CRASES DE RETORNO)"""
         if total == 0: total = 1
         percent = min(1.0, current / total)
