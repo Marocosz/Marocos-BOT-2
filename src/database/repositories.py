@@ -1,5 +1,5 @@
 from sqlalchemy import select, desc
-from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide, GuildConfig, CommunityProfile # <-- NOVO IMPORT
+from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide, GuildConfig, CommunityProfile
 from src.database.config import get_session
 from datetime import datetime
 
@@ -125,40 +125,24 @@ class MatchRepository:
             
     @staticmethod
     async def get_match_details(match_id: int):
-        """
-        Busca a partida pelo ID e retorna os jogadores de cada time.
-        Necessário para iniciar as enquetes de MVP/iMVP.
-        """
         async with get_session() as session:
-            # 1. Busca a partida (apenas partidas ATIVAS)
-            stmt = (
-                select(Match)
-                .where(Match.id == match_id)
-            )
+            stmt = select(Match).where(Match.id == match_id)
             result = await session.execute(stmt)
             match = result.scalar_one_or_none()
 
-            # Retorna None se não for encontrado OU se já estiver FINALIZADO/CANCELADO
             if not match or match.status != MatchStatus.IN_PROGRESS:
                 return None 
 
-            # 2. Busca todos os MatchPlayers para essa partida
-            stmt_players = (
-                select(MatchPlayer)
-                .where(MatchPlayer.match_id == match_id)
-            )
+            stmt_players = select(MatchPlayer).where(MatchPlayer.match_id == match_id)
             result_players = await session.execute(stmt_players)
             match_players = result_players.scalars().all()
             
-            # 3. Obtém os IDs de todos os jogadores
             player_ids = [mp.player_id for mp in match_players]
 
-            # 4. Busca os dados completos dos Players (nome, mmr, etc.) em UMA query
             stmt_players_data = select(Player).where(Player.discord_id.in_(player_ids))
             result_players_data = await session.execute(stmt_players_data)
             players_data = {p.discord_id: p for p in result_players_data.scalars().all()}
 
-            # 5. Mapeia e organiza nos times
             blue_team = []
             red_team = []
             for mp in match_players:
@@ -180,6 +164,7 @@ class MatchRepository:
                 'red_team': red_team
             }
 
+
     @staticmethod
     async def finish_match(match_id: int, winning_side: str):
         side_enum = TeamSide.BLUE if winning_side.upper() == 'BLUE' else TeamSide.RED
@@ -197,12 +182,10 @@ class MatchRepository:
             match.winning_side = side_enum
             match.finished_at = datetime.utcnow()
 
-            # Busca todos os jogadores da partida
             stmt_players = select(MatchPlayer).where(MatchPlayer.match_id == match_id)
             result_players = await session.execute(stmt_players)
             match_players = result_players.scalars().all()
 
-            # Processa vitórias e derrotas
             for mp in match_players:
                 player_stmt = select(Player).where(Player.discord_id == mp.player_id)
                 p_result = await session.execute(player_stmt)
@@ -230,21 +213,34 @@ class MatchRepository:
             match.finished_at = datetime.utcnow()
             return "SUCCESS"
 
-# --- REPOSITÓRIO DA COMUNIDADE (NOVO) ---
+# --- REPOSITÓRIO DA COMUNIDADE (ATUALIZADO) ---
 class CommunityRepository:
     
     @staticmethod
     async def add_xp(discord_id: int, xp_amount: int, has_media: bool = False):
         """Adiciona XP, contagem de mensagens e sobe de nível se necessário"""
         async with get_session() as session:
-            # Busca perfil ou cria um novo se não existir
             stmt = select(CommunityProfile).where(CommunityProfile.discord_id == discord_id)
             result = await session.execute(stmt)
             profile = result.scalar_one_or_none()
 
             if not profile:
-                profile = CommunityProfile(discord_id=discord_id, joined_at=datetime.utcnow())
+                # CORREÇÃO: Inicializa explicitamente todos os campos com 0 ou valor padrão
+                profile = CommunityProfile(
+                    discord_id=discord_id, 
+                    joined_at=datetime.utcnow(),
+                    xp=0,
+                    level=1,
+                    messages_sent=0,
+                    media_sent=0
+                )
                 session.add(profile)
+            
+            # Safety Check para dados legados corrompidos (Null no banco)
+            if profile.messages_sent is None: profile.messages_sent = 0
+            if profile.xp is None: profile.xp = 0
+            if profile.media_sent is None: profile.media_sent = 0
+            if profile.level is None: profile.level = 1
             
             # Atualiza Stats
             profile.messages_sent += 1
@@ -253,8 +249,7 @@ class CommunityRepository:
             if has_media:
                 profile.media_sent += 1
 
-            # Lógica Simples de Level Up (XP = Level * 100 * 1.2)
-            # Ex: Lvl 1->2 (120xp), Lvl 2->3 (240xp)
+            # Lógica Simples de Level Up
             xp_needed = int(profile.level * 100 * 1.2)
             
             leveled_up = False
@@ -276,7 +271,6 @@ class CommunityRepository:
     async def get_ranking_position(discord_id: int):
         """Calcula a posição do usuário no ranking de XP"""
         async with get_session() as session:
-            # Busca todos ordenados por Level DESC e XP DESC
             stmt = select(CommunityProfile.discord_id).order_by(desc(CommunityProfile.level), desc(CommunityProfile.xp))
             result = await session.execute(stmt)
             ids = result.scalars().all()
