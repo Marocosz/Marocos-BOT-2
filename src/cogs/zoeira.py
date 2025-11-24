@@ -7,7 +7,7 @@ class Zoeira(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.TONHAO_NAME = "Tonhão Calabresa"
-        self.TORRES_MENTION = "@torres1992" # O ID de menção customizado solicitado
+        self.TORRES_MENTION = "<410171778971992085>" # O ID de menção customizado solicitado. Corrigido para formato de menção de ID!
 
         # Lista de mensagens estruturadas (Target: None para não marcar)
         self.insults = [
@@ -21,7 +21,6 @@ class Zoeira(commands.Cog):
             {'target': 'Torres', 'text': "Torres, você é tão fofuxo, o meu salame boyzinho, lindinho.", 'tag': self.TORRES_MENTION}
         ]
 
-
     @commands.command(name="fdp")
     async def fdp_command(self, ctx: commands.Context):
         """Manda uma piada interna aleatória xingando o Tonhão ou o Torres."""
@@ -33,8 +32,7 @@ class Zoeira(commands.Cog):
         
         # 2. Aplica a marcação se o target for Torres
         if insult['tag']:
-            # Nota: A mensagem do Torres já inclui o @ dele no texto,
-            # mas vamos garantir que ele seja o primeiro na menção para destacar.
+            # Se for Torres, a menção deve ir primeiro para garantir o ping
             message = f"{insult['tag']} {message}" 
         
         await ctx.send(message)
