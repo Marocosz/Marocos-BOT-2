@@ -1,5 +1,5 @@
 from sqlalchemy import select, desc
-from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide, GuildConfig
+from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide, GuildConfig, CommunityProfile # <-- NOVO IMPORT
 from src.database.config import get_session
 from datetime import datetime
 
@@ -180,7 +180,6 @@ class MatchRepository:
                 'red_team': red_team
             }
 
-
     @staticmethod
     async def finish_match(match_id: int, winning_side: str):
         side_enum = TeamSide.BLUE if winning_side.upper() == 'BLUE' else TeamSide.RED
@@ -205,7 +204,6 @@ class MatchRepository:
 
             # Processa vitórias e derrotas
             for mp in match_players:
-                # Buscamos o Player de forma otimizada (poderia ser feito em batch, mas mantemos o loop para clareza)
                 player_stmt = select(Player).where(Player.discord_id == mp.player_id)
                 p_result = await session.execute(player_stmt)
                 player = p_result.scalar_one_or_none()
@@ -231,3 +229,59 @@ class MatchRepository:
             match.status = MatchStatus.CANCELLED
             match.finished_at = datetime.utcnow()
             return "SUCCESS"
+
+# --- REPOSITÓRIO DA COMUNIDADE (NOVO) ---
+class CommunityRepository:
+    
+    @staticmethod
+    async def add_xp(discord_id: int, xp_amount: int, has_media: bool = False):
+        """Adiciona XP, contagem de mensagens e sobe de nível se necessário"""
+        async with get_session() as session:
+            # Busca perfil ou cria um novo se não existir
+            stmt = select(CommunityProfile).where(CommunityProfile.discord_id == discord_id)
+            result = await session.execute(stmt)
+            profile = result.scalar_one_or_none()
+
+            if not profile:
+                profile = CommunityProfile(discord_id=discord_id, joined_at=datetime.utcnow())
+                session.add(profile)
+            
+            # Atualiza Stats
+            profile.messages_sent += 1
+            profile.xp += xp_amount
+            profile.last_message_at = datetime.utcnow()
+            if has_media:
+                profile.media_sent += 1
+
+            # Lógica Simples de Level Up (XP = Level * 100 * 1.2)
+            # Ex: Lvl 1->2 (120xp), Lvl 2->3 (240xp)
+            xp_needed = int(profile.level * 100 * 1.2)
+            
+            leveled_up = False
+            if profile.xp >= xp_needed:
+                profile.xp -= xp_needed # Reseta a barra para o próximo nível
+                profile.level += 1
+                leveled_up = True
+            
+            return leveled_up, profile.level
+
+    @staticmethod
+    async def get_profile(discord_id: int):
+        async with get_session() as session:
+            stmt = select(CommunityProfile).where(CommunityProfile.discord_id == discord_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_ranking_position(discord_id: int):
+        """Calcula a posição do usuário no ranking de XP"""
+        async with get_session() as session:
+            # Busca todos ordenados por Level DESC e XP DESC
+            stmt = select(CommunityProfile.discord_id).order_by(desc(CommunityProfile.level), desc(CommunityProfile.xp))
+            result = await session.execute(stmt)
+            ids = result.scalars().all()
+            
+            try:
+                return ids.index(discord_id) + 1
+            except ValueError:
+                return 0

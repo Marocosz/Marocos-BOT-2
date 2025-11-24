@@ -6,9 +6,9 @@ from src.database.config import Base
 
 # --- ENUMS (Padronização) ---
 class MatchStatus(enum.Enum):
-    OPEN = "open"      # Fila aberta / Draft
-    IN_PROGRESS = "live"  # Partida rolando
-    FINISHED = "finished"  # Finalizada
+    OPEN = "open"           # Fila aberta / Draft
+    IN_PROGRESS = "live"    # Partida rolando
+    FINISHED = "finished"   # Finalizada
     CANCELLED = "cancelled" # Cancelada por ADM
 
 class TeamSide(enum.Enum):
@@ -31,7 +31,7 @@ class GuildConfig(Base):
 
     guild_id = Column(BigInteger, primary_key=True)
     organizer_role_id = Column(BigInteger, nullable=True) # ID do cargo de Organizador
-    match_channel_id = Column(BigInteger, nullable=True) # Canal onde rolam os jogos
+    match_channel_id = Column(BigInteger, nullable=True)  # Canal onde rolam os jogos
     ranking_channel_id = Column(BigInteger, nullable=True) # Canal de atualizações de ranking
     tracking_channel_id = Column(BigInteger, nullable=True) # Novo: Canal de avisos de Elo
 
@@ -56,7 +56,7 @@ class Player(Base):
     solo_wins = Column(Integer, default=0)
     solo_losses = Column(Integer, default=0)
     
-    # Dados Flex 5v5 (NOVO)
+    # Dados Flex 5v5
     flex_tier = Column(String, default="UNRANKED")
     flex_rank = Column(String, default="")
     flex_lp = Column(Integer, default=0)
@@ -107,3 +107,20 @@ class MatchPlayer(Base):
     # Relacionamentos
     match = relationship("Match", back_populates="players")
     player = relationship("Player", back_populates="matches")
+
+# --- NOVO: PERFIL DE COMUNIDADE ---
+class CommunityProfile(Base):
+    """Perfil Social e de Gamificação do Usuário"""
+    __tablename__ = "community_profiles"
+
+    discord_id = Column(BigInteger, primary_key=True)
+    
+    # Estatísticas de Chat
+    xp = Column(Integer, default=0)
+    level = Column(Integer, default=1)
+    messages_sent = Column(Integer, default=0)
+    media_sent = Column(Integer, default=0) # Fotos/Arquivos
+    
+    # Metadados
+    last_message_at = Column(DateTime, default=datetime.utcnow)
+    joined_at = Column(DateTime, default=datetime.utcnow) # Quando começou a usar o bot
