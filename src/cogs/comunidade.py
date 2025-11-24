@@ -14,7 +14,7 @@ class Community(commands.Cog):
         # Dicionário para rastrear tempo de voz: {user_id: datetime_entrada}
         self.voice_sessions = {}
 
-    def generate_progress_bar(self, current, total, length=12):
+    def generate_progress_bar(self, current, total, length=20): # Aumentado para 20 blocos
         """Gera uma barra visual estilo Gamer"""
         if total == 0: total = 1
         percent = min(1.0, current / total)
@@ -79,7 +79,7 @@ class Community(commands.Cog):
                 
                 if minutes >= 1: 
                     xp_earned = minutes * 10 
-                    await CommunityRepository.add_xp(member.id, xp_earned, has_media=False)
+                    await CommunityRepository.add_xp(member.id, xp_earned, has_media=False, voice_minutes=minutes)
                     print(f"[Voice] {member.name} ganhou {xp_earned} XP.")
 
         # 3. Mudou de status
@@ -90,7 +90,7 @@ class Community(commands.Cog):
                     duration = datetime.utcnow() - start_time
                     minutes = int(duration.total_seconds() / 60)
                     if minutes >= 1:
-                        await CommunityRepository.add_xp(member.id, minutes * 10)
+                        await CommunityRepository.add_xp(member.id, minutes * 10, voice_minutes=minutes)
 
             elif before.self_mute and not after.self_mute:
                 self.voice_sessions[member.id] = datetime.utcnow()
@@ -104,7 +104,7 @@ class Community(commands.Cog):
                 if member.voice and not member.voice.self_mute and not member.voice.self_deaf and not member.bot:
                      self.voice_sessions[member.id] = datetime.utcnow()
 
-    # --- COMANDO SOCIAL ---
+    # --- COMANDO SOCIAL (DESIGN PREMIUM) ---
     @commands.command(name="social", aliases=["perfil_social", "rank", "comunidade"])
     async def social_profile(self, ctx, member: discord.Member = None):
         """Exibe o Cartão de Comunidade do usuário"""
@@ -121,80 +121,93 @@ class Community(commands.Cog):
         
         # Cores dinâmicas
         status_color = {
-            discord.Status.online: 0x43b581,
-            discord.Status.idle: 0xfaa61a,
-            discord.Status.dnd: 0xf04747,
-            discord.Status.offline: 0x747f8d
+            discord.Status.online: 0x43b581, # Verde Discord
+            discord.Status.idle: 0xfaa61a,   # Amarelo
+            discord.Status.dnd: 0xf04747,    # Vermelho
+            discord.Status.offline: 0x747f8d # Cinza
         }.get(target.status, 0x2b2d31)
 
         # Criação do Embed Maior e Mais Bonito
         embed = discord.Embed(title=f"🛡️ Cartão de Membro: {target.display_name}", color=status_color)
+        
+        # Thumbnail Grande no topo à direita
         embed.set_thumbnail(url=target.display_avatar.url)
 
         # --- CÁLCULOS ---
         xp_next_level = int(profile.level * 100 * 1.2)
-        xp_current_level_start = int((profile.level - 1) * 100 * 1.2) if profile.level > 1 else 0
-        xp_in_level = profile.xp - xp_current_level_start
-        if xp_in_level < 0: xp_in_level = 0
         
+        # XP dentro do nível atual
+        # Nota: Sua lógica de resetar XP ao upar torna profile.xp o valor correto dentro do nível
         progress_bar = self.generate_progress_bar(profile.xp, xp_next_level)
 
+        # Cálculo de Tempo de Voz Real do Banco
         hours = profile.voice_minutes // 60
         minutes = profile.voice_minutes % 60
-        voice_time_str = f"{hours}h {minutes}m"
+        
+        # Formatação Bonita do Tempo
+        if hours > 0:
+            voice_time_str = f"**{hours}**h **{minutes}**m"
+        else:
+            voice_time_str = f"**{minutes}** minutos"
 
-        # --- SEÇÃO 1: NÍVEL E PROGRESSO ---
+        # --- SEÇÃO 1: NÍVEL E PROGRESSO (Destacado) ---
         embed.add_field(
             name=f"🏆 Nível {profile.level}",
-            value=f"{progress_bar}\nTarget: **{profile.xp}** / {xp_next_level} XP",
+            value=f"{progress_bar}\nEXP Atual: `{profile.xp} / {xp_next_level}`",
             inline=False
         )
 
-        # --- SEÇÃO 2: ESTATÍSTICAS EM COLUNAS ---
-        stats_msg = (
-            f"✉️ **Mensagens:** `{profile.messages_sent}`\n"
-            f"🖼️ **Mídia:** `{profile.media_sent}`\n"
-            f"💎 **Rank Global:** `#{rank_pos}`"
+        # --- SEÇÃO 2: ESTATÍSTICAS PRINCIPAIS (Lado a Lado) ---
+        
+        # Coluna Esquerda: Chat e Mídia
+        chat_stats = (
+            f"💬 Mensagens: **{profile.messages_sent}**\n"
+            f"🖼️ Mídia Enviada: **{profile.media_sent}**\n"
         )
-        embed.add_field(name="📊 Atividade", value=stats_msg, inline=True)
+        embed.add_field(name="📝 Atividade de Texto", value=chat_stats, inline=True)
 
-        # Coluna 2: Dados da Conta
+        # Coluna Direita: Voz e Ranking (Destaque ao Tempo de Voz)
+        voice_stats = (
+            f"🎙️ Tempo em Call: {voice_time_str}\n"
+            f"💎 Rank Global: **#{rank_pos}**"
+        )
+        embed.add_field(name="🔊 Atividade de Voz", value=voice_stats, inline=True)
+
+        # Separador Visual
+        embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+
+        # --- SEÇÃO 3: METADADOS E STATUS ---
+        
+        # Datas formatadas
         joined_at = f"<t:{int(target.joined_at.timestamp())}:R>" if target.joined_at else "N/A"
         created_at = f"<t:{int(target.created_at.timestamp())}:d>"
         
-        account_info = (
-            f"📅 **Entrou:** {joined_at}\n"
-            f"🎂 **Criada em:** {created_at}\n"
-            f"🎙️ **Tempo Voz:** `{voice_time_str}`*"
-        )
-        embed.add_field(name="👤 Conta", value=account_info, inline=True)
-
-        # --- SEÇÃO 3: STATUS E CARGOS ---
-        embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
-        
         activity_status = self.get_activity_status(profile.last_message_at)
         
-        # Roles
+        # Roles (Exibir os 3 principais)
         roles = [r.mention for r in target.roles if r.name != "@everyone"]
         roles.reverse() 
         roles_str = " ".join(roles[:3]) if roles else "Sem cargos"
         if len(roles) > 3: roles_str += f" (+{len(roles)-3})"
 
-        embed.add_field(name="📡 Status Atual", value=activity_status, inline=True)
-        embed.add_field(name="🎭 Cargos Principais", value=roles_str, inline=True)
+        embed.add_field(name="📡 Status da Comunidade", value=activity_status, inline=True)
+        embed.add_field(name="🎭 Cargos", value=roles_str, inline=True)
+        
+        # Linha final com datas
+        embed.add_field(name="📅 Histórico", value=f"Entrou: {joined_at} • Criou: {created_at}", inline=False)
 
-        embed.set_footer(text="*Tempo de voz estimado baseado no XP ganho.")
+        # Footer limpo
+        embed.set_footer(text=f"ID: {target.id} • Continue interagindo para subir de nível!")
         
         view = BaseInteractiveView(timeout=60)
         view.message = await ctx.reply(embed=embed, view=view)
 
 
-    # --- NOVO COMANDO: RANKING XP ---
+    # --- COMANDO: RANKING XP ---
     @commands.command(name="ranking_xp", aliases=["topxp", "top_social"])
     async def ranking_xp(self, ctx):
         """Mostra o Top 10 membros mais ativos da comunidade"""
         
-        # Busca os top 10 perfis do banco
         top_profiles = await CommunityRepository.get_top_xp(10)
         
         if not top_profiles:
@@ -208,21 +221,22 @@ class Community(commands.Cog):
 
         rank_text = ""
         for i, p in enumerate(top_profiles):
-            # Tenta pegar o membro no servidor para mostrar o nome atual
             member = ctx.guild.get_member(p.discord_id)
+            display_name = member.display_name if member else f"User {p.discord_id}"
             
-            # Se o membro saiu do servidor, mostramos "Usuário Saiu"
-            display_name = member.display_name if member else "Usuário Saiu"
-            
-            # Medalhas para o top 3
             if i == 0: icon = "🥇"
             elif i == 1: icon = "🥈"
             elif i == 2: icon = "🥉"
             else: icon = f"`{i+1}.`"
 
-            rank_text += f"{icon} **{display_name}** • Nível **{p.level}** ({p.xp} XP)\n"
+            # Formata horas para o ranking
+            hours = p.voice_minutes // 60
+            mins = p.voice_minutes % 60
+            voice_str = f"{hours}h{mins}m" if hours > 0 else f"{mins}m"
 
-        embed.add_field(name="Top 10", value=rank_text, inline=False)
+            rank_text += f"{icon} **{display_name}** • Nível **{p.level}** • 🎙️ {voice_str}\n"
+
+        embed.add_field(name="Top 10 Geral", value=rank_text, inline=False)
         embed.set_footer(text="Continue interagindo para subir no ranking!")
         
         view = BaseInteractiveView(timeout=60)
