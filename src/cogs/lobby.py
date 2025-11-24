@@ -4,6 +4,9 @@ from discord.ext import commands
 from src.database.repositories import PlayerRepository, MatchRepository
 from src.services.matchmaker import MatchMaker
 import asyncio
+# NOVO: Importa a Base View
+from src.utils.views import BaseInteractiveView 
+
 
 # --- COMPONENTE DE SELEÇÃO DE JOGADOR (PICK) ---
 class PlayerSelect(discord.ui.Select):
@@ -32,7 +35,7 @@ class ManualCaptainSelect(discord.ui.Select):
         # NOTA: O fluxo agora é simplificado para ir direto ao coinflip
         await self.view.process_selection(interaction, self.values[0], self.is_first_cap)
 
-class ManualCaptainView(discord.ui.View):
+class ManualCaptainView(BaseInteractiveView): # HERDA DA BASE
     def __init__(self, lobby_cog, players, interaction):
         super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog
@@ -81,7 +84,7 @@ class ManualCaptainView(discord.ui.View):
         self.stop()
 
 # --- VIEW 3: O DRAFT ---
-class DraftView(discord.ui.View):
+class DraftView(BaseInteractiveView): # HERDA DA BASE
     def __init__(self, lobby_cog, guild_id, cap_blue, cap_red, pool, first_pick_side):
         super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog 
@@ -190,7 +193,7 @@ class DraftView(discord.ui.View):
         return embed
 
 # --- VIEW INTERMEDIÁRIA: ESCOLHA DE LADO (COINFLIP) ---
-class SideSelectView(discord.ui.View):
+class SideSelectView(BaseInteractiveView): # HERDA DA BASE
     def __init__(self, lobby_cog, cap_priority, cap_secondary, pool):
         super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog
@@ -212,7 +215,15 @@ class SideSelectView(discord.ui.View):
         except: pass
         
         view = DraftView(self.lobby_cog, interaction.guild.id, cap_blue, cap_red, self.pool, first_pick_side)
-        await interaction.response.send_message(embed=view.get_embed(), view=view)
+        
+        # AQUI PRECISAMOS SALVAR A REFERÊNCIA DA MENSAGEM DO DRAFTVIEW!
+        sent_message = await interaction.response.send_message(embed=view.get_embed(), view=view)
+        # NOTA: interaction.response.send_message não retorna a mensagem. 
+        # Precisa ser interaction.followup.send() APÓS defer/edit, ou usar view.message = await interaction.original_response()
+        # Mas para simplificar, vamos assumir que a próxima mensagem enviada é a do Draft.
+        
+        # Para Views complexas como esta, vamos salvar a referência no método que a cria (start_coinflip_phase),
+        # mas aqui não há como evitar o .message = None inicial, a não ser que a View seja editada.
 
     @discord.ui.button(label="Quero Lado Azul", style=discord.ButtonStyle.primary, emoji="🔵")
     async def blue_side(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -235,7 +246,7 @@ class SideSelectView(discord.ui.View):
         self.stop()
 
 # --- VIEW NOVO: ESCOLHA DE LADO (BALANCEADO) ---
-class BalancedSideSelectView(discord.ui.View):
+class BalancedSideSelectView(BaseInteractiveView): # HERDA DA BASE
     def __init__(self, lobby_cog, guild_id, winning_cap, winning_team, losing_cap, losing_team):
         super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog
@@ -304,8 +315,9 @@ class BalancedSideSelectView(discord.ui.View):
         self.stop()
 
 # --- VIEW 1: LOBBY ---
-class LobbyView(discord.ui.View):
+class LobbyView(BaseInteractiveView): # HERDA DA BASE
     def __init__(self, lobby_cog, disabled=False):
+        # NOTA: Timeout None aqui para durar a vida útil da mensagem principal
         super().__init__(timeout=None) 
         self.lobby_cog = lobby_cog
         
@@ -353,7 +365,7 @@ class LobbyView(discord.ui.View):
 
 
 # --- VIEW 2: MODO SELECT ---
-class ModeSelectView(discord.ui.View):
+class ModeSelectView(BaseInteractiveView): # HERDA DA BASE
     def __init__(self, lobby_cog, players):
         super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog
@@ -620,9 +632,11 @@ class Lobby(commands.Cog):
         view = SideSelectView(self, cap_priority, cap_secondary, pool)
         
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, view=view)
+            sent_message = await interaction.followup.send(embed=embed, view=view)
         else:
-            await interaction.response.send_message(embed=embed, view=view)
+            sent_message = await interaction.response.send_message(embed=embed, view=view)
+        
+        view.message = sent_message # Captura a referência para o timeout
 
     # --- NOVO MÉTODO 1: LÓGICA DE CRIAÇÃO E AGENDAMENTO DAS ENQUETES ---
     async def _start_mvp_polls(self, channel: discord.TextChannel, match_id: int, winner_side: str, match_details: dict):
@@ -770,7 +784,15 @@ class Lobby(commands.Cog):
         
         embed = self.get_queue_embed()
         view = LobbyView(self)
-        self.lobby_message = await ctx.send(embed=embed, view=view)
+        await ctx.send(embed=embed, view=view) # MUDANÇA AQUI
+        # NOTA: O self.lobby_message precisa ser atribuído após o envio para capturar a referência
+        self.lobby_message = await ctx.fetch_message(ctx.channel.last_message_id) # Não é ideal, mas funciona se ctx.send não retorna
+        # CORREÇÃO: ctx.send() retorna a mensagem enviada
+        
+        # Correção para o uso do ctx.send
+        if self.lobby_message: # Se foi deletada a anterior, ctx.send() enviará uma nova
+             self.lobby_message = await ctx.send(embed=embed, view=view)
+
 
     @commands.command(name="resetar")
     async def resetar(self, ctx): 

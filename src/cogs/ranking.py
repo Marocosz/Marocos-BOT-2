@@ -4,10 +4,12 @@ from discord.ext import commands
 from src.database.repositories import PlayerRepository
 from src.services.riot_api import RiotAPI
 from src.services.matchmaker import MatchMaker
+from src.utils.views import BaseInteractiveView # <-- NOVO: Importa a Base View
 
-# --- VIEW DE PAGINAÇÃO (MODIFICADA PARA 1/1) ---
-class RankingPaginationView(discord.ui.View):
-    def __init__(self, players, ctx, per_page=10): # Recebe ctx para o check de interação
+# --- VIEW DE PAGINAÇÃO (MODIFICADA PARA HERANÇA) ---
+class RankingPaginationView(BaseInteractiveView): # <-- HERDA DA BASE
+    def __init__(self, players, ctx, per_page=10): 
+        # O timeout de 120s (2 min) é mantido, passando-o para a Base
         super().__init__(timeout=120) 
         self.players = players
         self.per_page = per_page
@@ -123,8 +125,9 @@ class Ranking(commands.Cog):
         # Cria a View de Paginação
         view = RankingPaginationView(players, ctx=ctx, per_page=10)
         
-        # Envia a primeira página
-        await ctx.reply(embed=view.create_embed(), view=view)
+        # Envia a primeira página e SALVA A REFERÊNCIA
+        sent_message = await ctx.reply(embed=view.create_embed(), view=view)
+        view.message = sent_message # <--- Captura a referência para o on_timeout
 
     # --- COMANDO 2: PERFIL (CORRIGIDO LINK OP.GG) ---
     @commands.command(name="perfil")
@@ -226,11 +229,8 @@ class Ranking(commands.Cog):
             
             # --- CORREÇÃO DE LINK OP.GG ---
             name_and_tag = player.riot_name 
-            # 1. Substitui espaços por hífens
             url_friendly_name = name_and_tag.replace(' ', '-')
-            # 2. Substitui # por hífen
             final_url_path = url_friendly_name.replace('#', '-')
-            
             riot_link = f"[{name_and_tag}](https://www.op.gg/summoners/br/{final_url_path})"
             # -----------------------------
             
@@ -266,17 +266,17 @@ class Ranking(commands.Cog):
                     pts_str = f"{points/1000:.1f}k" if points > 1000 else str(points)
                     m_list.append(f"`#{i+1}` **{name}** (M{c['championLevel']}) • {pts_str}")
                 embed.add_field(name="🔥 Top Maestrias", value="\n".join(m_list), inline=False)
-            
-            embed.add_field(name="\u200b", value="\u200b", inline=False)
+
+            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
             
             total_ih = player.wins + player.losses
             wr_ih = (player.wins / total_ih * 100) if total_ih > 0 else 0.0
             
             stats_block = (
                 f"```yaml\n"
-                f"MMR:  {player.mmr}\n"
+                f"MMR: {player.mmr}\n"
                 f"Jogos: {total_ih}\n"
-                f"V/D:  {player.wins} - {player.losses}\n"
+                f"V/D: {player.wins} - {player.losses}\n"
                 f"Win%: {wr_ih:.1f}%\n"
                 f"```"
             )
@@ -327,7 +327,7 @@ class Ranking(commands.Cog):
         phase = "Veterano"
         k_factor = 2
         
-        if total_games < 50:  
+        if total_games < 50: 
             k_factor = 20
             phase = "Calibração (Smurf?)"
         elif total_games < 100: 
@@ -339,7 +339,7 @@ class Ranking(commands.Cog):
         elif total_games < 200: 
             k_factor = 4
             phase = "Consolidação"
-        else:          
+        else:     
             k_factor = 2
             phase = "Elo Definido"
         
@@ -379,8 +379,8 @@ class Ranking(commands.Cog):
 
         formula_visual = (
             f"```ini\n"
-            f"[ Base Ajustada ]  [ Bônus WR ]   [ MMR FINAL ]\n"
-            f"  {base_adjusted:<5}    +  {bonus:<5}   =  {final}\n"
+            f"[ Base Ajustada ] [ Bônus WR ]  [ MMR FINAL ]\n"
+            f" {base_adjusted:<5}  + {bonus:<5}  = {final}\n"
             f"```"
         )
         

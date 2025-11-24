@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from src.utils.views import BaseInteractiveView
 
 # --- BOTÃO DE FECHAR ---
 class CloseButton(discord.ui.Button):
@@ -311,7 +312,7 @@ class HelpSelect(discord.ui.Select):
         new_view = HelpView(self.bot, self.user_id) # <-- Deve usar self.user_id
         await interaction.response.edit_message(embed=embed, view=new_view)
 
-class HelpView(discord.ui.View):
+class HelpView(BaseInteractiveView):
     def __init__(self, bot, user_id: int): # Adicionado user_id
         super().__init__(timeout=120)
         self.user_id = user_id # Guarda user_id

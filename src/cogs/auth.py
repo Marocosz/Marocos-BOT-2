@@ -2,15 +2,17 @@ import discord
 import random
 from discord.ext import commands
 import unicodedata
+# NOVO: Importamos a classe base de views
+from src.utils.views import BaseInteractiveView 
 
 from src.services.riot_api import RiotAPI
 from src.database.repositories import PlayerRepository
 
 
-# View do Botão (Continua igual, pois botões são ótimos para segurança)
-class VerifyView(discord.ui.View):
+# View do Botão (Herdando da Base)
+class VerifyView(BaseInteractiveView): # <--- HERDANDO DA CLASSE BASE
     def __init__(self, bot, ctx, riot_service, puuid, target_icon_id, account_data, lanes):
-        super().__init__(timeout=180)
+        super().__init__(timeout=180) # Chamamos o __init__ da Base com o timeout
         self.bot = bot
         self.ctx = ctx
         self.riot_service = riot_service
@@ -46,7 +48,8 @@ class VerifyView(discord.ui.View):
                 embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{current_icon}.png")
 
                 self.clear_items()
-                await interaction.edit_original_response(embed=embed, view=self)
+                # NOTA: O self.stop() encerra o timer e a view.
+                await interaction.edit_original_response(embed=embed, view=self) 
                 self.stop()
             else:
                 await interaction.followup.send(
@@ -103,48 +106,30 @@ class Auth(commands.Cog):
             
         # 1. Limpeza Imediata da string completa
         cleaned_full_args = self.remove_invisible(args).strip()
-
-        # --- PARSER POR POSIÇÃO (MAIS ROBUSTO CONTRA CARACTERES INVÁLIDOS) ---
-        
-        # 2. Encontrar a última parte que NÃO é uma lane
         parts = cleaned_full_args.split() 
-        
-        # Lista temporária para armazenar as lanes na ordem [L2, L1] (se encontradas)
-        found_lane_parts = [] 
-        
-        # Tenta extrair a L2 (parts[-1]) e depois a L1 (parts[-2])
-        if len(parts) >= 1:
-            # Tenta pegar a última como L2 (Secondary na lógica de parsing, mas L2 na ordem)
-            l2_input = parts[-1]
-            if self.clean_lane(l2_input):
-                found_lane_parts.append(l2_input) # L2 (ex: Top)
-                
-                if len(parts) >= 2:
-                    # Tenta pegar a penúltima como L1 (Main na lógica de parsing, mas L1 na ordem)
-                    l1_input = parts[-2]
-                    if self.clean_lane(l1_input):
-                        found_lane_parts.append(l1_input) # L1 (ex: Mid)
-        
-        # 3. Mapeamento das Lanes e Riot ID
-        
-        # Se encontrou 2 lanes (L2, L1)
-        if len(found_lane_parts) == 2:
-            # found_lane_parts[0] = L2 (TOP), found_lane_parts[1] = L1 (MID)
-            main_lane = found_lane_parts[1] # L1 deve ser a Main
-            sec_lane = found_lane_parts[0]  # L2 deve ser a Sec
-            riot_id = " ".join(parts[:-2]).strip()
-        # Se encontrou 1 lane (L2 ou L1, deve ser L2)
-        elif len(found_lane_parts) == 1:
-            main_lane = found_lane_parts[0]
-            sec_lane = None
-            riot_id = " ".join(parts[:-1]).strip()
-        # Se não encontrou nenhuma lane (o Nick#TAG foi o último ou único argumento)
-        else:
-            # 4. VALIDAÇÃO MÍNIMA CORRETA
+
+        # 2. VALIDAÇÃO MÍNIMA: Precisa de Nick#TAG E a Lane (mínimo de 2 partes)
+        if len(parts) < 2:
             await ctx.reply("❌ Você precisa informar pelo menos Nick#TAG e a lane principal.")
             return
 
-        # ---------------------------------------------------------
+        # 3. Restante do Parsing 
+
+        main_lane_input = parts[-1]
+        
+        sec_lane_input = None
+        riot_id_parts = parts[:-1]
+
+        if len(riot_id_parts) > 0:
+            # Verifica se a penúltima parte (última de riot_id_parts) é uma lane
+            possible_sec_lane = riot_id_parts[-1]
+            if self.clean_lane(possible_sec_lane):
+                sec_lane_input = possible_sec_lane
+                # Se encontrou Sec Lane, remove ela das partes do Riot ID
+                riot_id_parts = riot_id_parts[:-1]
+        
+        # 4. O que sobrou é o Riot ID (Nome + TAG)
+        riot_id = " ".join(riot_id_parts).strip()
 
         # 5. Checagem de formato final da TAG
         if "#" not in riot_id:
@@ -152,16 +137,23 @@ class Auth(commands.Cog):
             return
 
         # 6. Limpeza e Finalização do Dicionário
-        m_lane_clean = self.clean_lane(main_lane)
-        s_lane_clean = self.clean_lane(sec_lane) if sec_lane else None
+        m_lane_clean = self.clean_lane(main_lane_input) 
+        s_lane_clean = self.clean_lane(sec_lane_input) if sec_lane_input else None
 
         if not m_lane_clean:
-            # Checagem de segurança (redundante)
             await ctx.reply("❌ Lane principal inválida! Use: Top, Jungle, Mid, Adc ou Sup.")
             return
 
-        # Dicionário de Lanes final (L1 -> Main, L2 -> Sec)
-        lanes_data = {'main': m_lane_clean, 'sec': s_lane_clean}
+        # --- CORREÇÃO DA INVERSÃO DE LANES (SWAP) ---
+        if s_lane_clean:
+            final_main = s_lane_clean
+            final_sec = m_lane_clean
+        else:
+            final_main = m_lane_clean
+            final_sec = None
+            
+        lanes_data = {'main': final_main, 'sec': final_sec}
+        # -------------------------------------------
 
 
         msg_wait = await ctx.reply("⏳ Buscando conta na Riot...")
@@ -209,7 +201,9 @@ class Auth(commands.Cog):
             )
 
             await msg_wait.delete()
-            await ctx.reply(embed=embed, view=view)
+            sent_message = await ctx.reply(embed=embed, view=view) # Captura a mensagem enviada
+            view.message = sent_message # <--- ATRIBUI A REFERÊNCIA DA MENSAGEM
+            
 
         except Exception as e:
             print(f"Erro .registrar: {e}")
