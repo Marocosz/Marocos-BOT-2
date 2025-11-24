@@ -266,8 +266,8 @@ class Ranking(commands.Cog):
                     pts_str = f"{points/1000:.1f}k" if points > 1000 else str(points)
                     m_list.append(f"`#{i+1}` **{name}** (M{c['championLevel']}) • {pts_str}")
                 embed.add_field(name="🔥 Top Maestrias", value="\n".join(m_list), inline=False)
-
-            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+            
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
             
             total_ih = player.wins + player.losses
             wr_ih = (player.wins / total_ih * 100) if total_ih > 0 else 0.0
@@ -365,7 +365,7 @@ class Ranking(commands.Cog):
             
         embed.add_field(name="2️⃣ Ajuste de Fila", value=f"{q_text}{q_desc}", inline=True)
         
-        embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         sinal = "+" if bonus >= 0 else ""
         perf_explain = (
