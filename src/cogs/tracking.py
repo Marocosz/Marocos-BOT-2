@@ -4,6 +4,8 @@ import random
 from discord.ext import commands, tasks
 from src.services.riot_api import RiotAPI
 from src.database.repositories import PlayerRepository, GuildRepository
+# NOVO: Importar o MatchMaker para recalcular o MMR no loop
+from src.services.matchmaker import MatchMaker 
 
 class RankingTracking(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -16,7 +18,7 @@ class RankingTracking(commands.Cog):
     def cog_unload(self):
         self.check_ranks_loop.cancel()
 
-    # --- MENSAGENS ALEATÓRIAS (CORRIGIDAS) ---
+    # --- MENSAGENS ALEATÓRIAS ---
     promotions = [
         "🚀 **{user}** acabou de subir para **{tier} {rank} ({queue})**! Ninguém segura!",
         "🎉 Parabéns **{user}**! Alcançou **{tier} {rank} ({queue})**. O topo é o limite.",
@@ -35,7 +37,6 @@ class RankingTracking(commands.Cog):
 
     # --- LÓGICA DE COMPARAÇÃO ---
     def elo_value(self, tier, rank):
-        # Transforma Elo em número para comparar (Ex: Gold 4 < Gold 3)
         t_val = {'IRON': 0, 'BRONZE': 10, 'SILVER': 20, 'GOLD': 30, 'PLATINUM': 40, 'EMERALD': 50, 'DIAMOND': 60, 'MASTER': 70, 'GRANDMASTER': 80, 'CHALLENGER': 90, 'UNRANKED': -1}
         r_val = {'IV': 0, 'III': 1, 'II': 2, 'I': 3, '': 0}
         
@@ -49,92 +50,102 @@ class RankingTracking(commands.Cog):
     async def check_ranks_loop(self):
         await self.bot.wait_until_ready()
         
-        # Para cada servidor que o bot está
         for guild in self.bot.guilds:
             channel_id = await GuildRepository.get_tracking_channel(guild.id)
-            if not channel_id: continue # Se não configurou canal, pula
-            
-            channel = self.bot.get_channel(channel_id)
-            if not channel: continue
+            # Mesmo se não tiver canal configurado, queremos atualizar o MMR no banco
+            channel = self.bot.get_channel(channel_id) if channel_id else None
 
-            # Busca jogadores (Idealmente filtrar por guilda, mas como é bot privado, pega todos)
             players = await PlayerRepository.get_all_players_with_puuid()
 
             for p in players:
                 try:
-                    # Evita rate limit da Riot
-                    await asyncio.sleep(1.5) 
+                    await asyncio.sleep(1.5) # Rate limit
 
                     # 1. Busca Elo Atual na Riot
                     riot_ranks = await self.riot_service.get_rank_by_puuid(p.riot_puuid)
                     
-                    # Filtra filas ativas
                     solo_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
                     flex_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
                     
                     active_queue = None
-                    queue_type = None
-                    old_tier, old_rank = "UNRANKED", "" # Default
+                    queue_type_str = None
+                    old_tier, old_rank = "UNRANKED", "" 
 
                     # PRIORIDADE: SoloQ
                     if solo_data:
                         active_queue = solo_data
-                        queue_type = 'RANKED_SOLO_5x5'
+                        queue_type_str = 'RANKED_SOLO_5x5'
                         old_tier, old_rank = p.solo_tier, p.solo_rank
                     # FALLBACK: Flex
                     elif flex_data:
                         active_queue = flex_data
-                        queue_type = 'RANKED_FLEX_SR'
+                        queue_type_str = 'RANKED_FLEX_SR'
                         old_tier, old_rank = p.flex_tier, p.flex_rank
                     else:
-                        continue # Não tem rank em nenhuma fila
+                        continue 
 
-                    # 2. Compara com o Banco
+                    # --- NOVO: RECALCULA O MMR SEMPRE ---
+                    # Isso garante que o .ranking esteja sempre atualizado, mesmo sem mudar de elo
+                    new_calculated_mmr = MatchMaker.calculate_adjusted_mmr(
+                        tier=active_queue['tier'],
+                        rank=active_queue['rank'],
+                        lp=active_queue['leaguePoints'],
+                        wins=active_queue['wins'],
+                        losses=active_queue['losses'],
+                        queue_type=queue_type_str
+                    )
+                    # ------------------------------------
+
+                    # 2. Compara para Notificação
                     old_val = self.elo_value(old_tier, old_rank)
                     new_val = self.elo_value(active_queue['tier'], active_queue['rank'])
                     
                     current_tier = active_queue['tier']
                     current_rank = active_queue['rank']
                     
-                    queue_name = "Solo/Duo" if queue_type == 'RANKED_SOLO_5x5' else "Flex 5v5" # NOVO: Nome da Fila para formatação
+                    queue_name = "Solo/Duo" if queue_type_str == 'RANKED_SOLO_5x5' else "Flex 5v5"
 
-                    # 3. Lógica de Promoção/Rebaixamento (Verifica apenas mudança de Tier ou Divisão)
-
-                    # Se o banco está desatualizado (por exemplo, "UNRANKED" ou Elo antigo)
+                    # Se é o primeiro registro
                     if old_val <= self.elo_value("UNRANKED", "") and new_val > self.elo_value("UNRANKED", ""):
-                        # Primeiro registro de elo (não avisa, só salva o estado inicial)
                         await PlayerRepository.update_riot_rank(
                             p.discord_id, current_tier, current_rank, active_queue['leaguePoints'], 
-                            active_queue['wins'], active_queue['losses'], p.mmr, queue_type=queue_type
+                            active_queue['wins'], active_queue['losses'], 
+                            new_calculated_mmr, # Usa o novo MMR calculado
+                            queue_type=queue_type_str
                         )
                         continue
 
+                    # Mudança de Elo (Notificação)
                     if new_val != old_val:
-                        
                         action = "promotions" if new_val > old_val else "demotions"
                         color = 0x2ecc71 if new_val > old_val else 0xe74c3c
                         
-                        # ALTERAÇÃO AQUI: Passa TIER, RANK e o novo {queue} separadamente
-                        msg = random.choice(getattr(self, action)).format(
-                            user=f"<@{p.discord_id}>", 
-                            tier=current_tier, 
-                            rank=current_rank,
-                            queue=queue_name
-                        )
-                        embed = discord.Embed(description=msg, color=color) # Verde
-                        await channel.send(embed=embed)
+                        # Só envia msg se tiver canal configurado
+                        if channel:
+                            msg = random.choice(getattr(self, action)).format(
+                                user=f"<@{p.discord_id}>", 
+                                tier=current_tier, 
+                                rank=current_rank,
+                                queue=queue_name
+                            )
+                            embed = discord.Embed(description=msg, color=color)
+                            await channel.send(embed=embed)
                         
-                        # Atualiza DB
+                        # Atualiza DB com novo MMR
                         await PlayerRepository.update_riot_rank(
                             p.discord_id, current_tier, current_rank, active_queue['leaguePoints'], 
-                            active_queue['wins'], active_queue['losses'], p.mmr, queue_type=queue_type
+                            active_queue['wins'], active_queue['losses'], 
+                            new_calculated_mmr, # Usa o novo MMR calculado
+                            queue_type=queue_type_str
                         )
 
-                    elif new_val == old_val:
-                         # Se o elo não mudou, mas os dados (LP/Wins/Losses) podem ter mudado
+                    # Se o elo não mudou, mas atualizamos o MMR/LP (ESSA É A PARTE QUE FALTAVA)
+                    else:
                          await PlayerRepository.update_riot_rank(
                             p.discord_id, current_tier, current_rank, active_queue['leaguePoints'], 
-                            active_queue['wins'], active_queue['losses'], p.mmr, queue_type=queue_type
+                            active_queue['wins'], active_queue['losses'], 
+                            new_calculated_mmr, # Usa o novo MMR calculado e SALVA
+                            queue_type=queue_type_str
                         )
 
                 except Exception as e:
@@ -159,16 +170,14 @@ class RankingTracking(commands.Cog):
         player = await PlayerRepository.get_player_by_discord_id(jogador.id)
         if not player: return await ctx.reply("❌ Jogador não registrado.")
         
-        # Mapeia a fila para o formato do repositório
         queue_type = 'RANKED_FLEX_SR' if fila.upper() == 'FLEX' else 'RANKED_SOLO_5x5'
         
-        # Força atualização no banco com dados falsos/antigos
         await PlayerRepository.update_riot_rank(
             discord_id=player.discord_id,
             tier=tier.upper(),
             rank=rank.upper(),
             lp=0, wins=0, losses=0, calculated_mmr=player.mmr,
-            queue_type=queue_type # Passa o tipo de fila
+            queue_type=queue_type
         )
         
         await ctx.reply(f"🕵️ **Modo Teste:** O Elo {fila.upper()} de {jogador.display_name} no banco agora é **{tier} {rank}**.\n⏳ Aguarde o loop automático (ou force o check) para ver o aviso de mudança.")

@@ -2,17 +2,17 @@ import discord
 import random
 from discord.ext import commands
 import unicodedata
-# NOVO: Importamos a classe base de views
 from src.utils.views import BaseInteractiveView 
 
 from src.services.riot_api import RiotAPI
+from src.services.matchmaker import MatchMaker # <-- NOVO IMPORT
 from src.database.repositories import PlayerRepository
 
 
 # View do Botão (Herdando da Base)
-class VerifyView(BaseInteractiveView): # <--- HERDANDO DA CLASSE BASE
+class VerifyView(BaseInteractiveView): 
     def __init__(self, bot, ctx, riot_service, puuid, target_icon_id, account_data, lanes):
-        super().__init__(timeout=180) # Chamamos o __init__ da Base com o timeout
+        super().__init__(timeout=180) 
         self.bot = bot
         self.ctx = ctx
         self.riot_service = riot_service
@@ -36,19 +36,62 @@ class VerifyView(BaseInteractiveView): # <--- HERDANDO DA CLASSE BASE
             if current_icon == self.target_icon_id:
                 full_data = {**self.account_data, 'profileIconId': current_icon}
 
+                # 1. Cria o registro inicial
                 await PlayerRepository.upsert_player(
                     discord_id=self.ctx.author.id,
                     riot_data=full_data,
                     lane_main=self.lanes['main'],
                     lane_sec=self.lanes['sec']
                 )
+                
+                # 2. NOVO: Busca e Atualiza o MMR Inicial imediatamente
+                try:
+                    riot_ranks = await self.riot_service.get_rank_by_puuid(self.puuid)
+                    
+                    # Tenta SoloQ
+                    rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
+                    queue_type = 'RANKED_SOLO_5x5'
+                    
+                    # Fallback Flex
+                    if not rank_data:
+                        rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
+                        queue_type = 'RANKED_FLEX_SR'
+                    
+                    if rank_data:
+                        # Calcula MMR
+                        initial_mmr = MatchMaker.calculate_adjusted_mmr(
+                            tier=rank_data['tier'], 
+                            rank=rank_data['rank'], 
+                            lp=rank_data['leaguePoints'], 
+                            wins=rank_data['wins'], 
+                            losses=rank_data['losses'],
+                            queue_type=queue_type
+                        )
+                        
+                        # Salva no banco
+                        await PlayerRepository.update_riot_rank(
+                            discord_id=self.ctx.author.id,
+                            tier=rank_data['tier'],
+                            rank=rank_data['rank'],
+                            lp=rank_data['leaguePoints'],
+                            wins=rank_data['wins'],
+                            losses=rank_data['losses'],
+                            calculated_mmr=initial_mmr,
+                            queue_type=queue_type
+                        )
+                    else:
+                        # Se for Unranked, define MMR base 1000
+                        await PlayerRepository.update_riot_rank(self.ctx.author.id, "UNRANKED", "", 0, 0, 0, 1000)
+                        
+                except Exception as e:
+                    print(f"Erro ao calcular MMR inicial no registro: {e}")
+                    # Não falha o registro, apenas o MMR fica padrão até a próxima atualização
 
                 embed = discord.Embed(title="✅ Identidade Confirmada!", color=0x00ff00)
                 embed.description = f"Conta **{self.account_data['gameName']}** vinculada com sucesso."
                 embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{current_icon}.png")
 
                 self.clear_items()
-                # NOTA: O self.stop() encerra o timer e a view.
                 await interaction.edit_original_response(embed=embed, view=self) 
                 self.stop()
             else:
@@ -65,11 +108,9 @@ class Auth(commands.Cog):
         self.bot = bot
         self.riot_service = RiotAPI()
 
-    # Remove caracteres invisíveis (problema comum vindo de celular)
     def remove_invisible(self, text: str):
         if not text:
             return text
-        # Garantimos a limpeza de caracteres de formatação
         return "".join(
             c for c in text
             if unicodedata.category(c) != "Cf"
@@ -201,8 +242,8 @@ class Auth(commands.Cog):
             )
 
             await msg_wait.delete()
-            sent_message = await ctx.reply(embed=embed, view=view) # Captura a mensagem enviada
-            view.message = sent_message # <--- ATRIBUI A REFERÊNCIA DA MENSAGEM
+            sent_message = await ctx.reply(embed=embed, view=view) 
+            view.message = sent_message 
             
 
         except Exception as e:
