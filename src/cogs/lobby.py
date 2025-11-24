@@ -18,7 +18,7 @@ class PlayerSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await self.view.process_pick(interaction, self.values[0])
 
-# --- VIEW DE SELEÇÃO DE CAPITÃO MANUAL ---
+# --- VIEW DE SELEÇÃO DE CAPITÃO MANUAL (AJUSTADA) ---
 class ManualCaptainSelect(discord.ui.Select):
     def __init__(self, players, placeholder, is_first_cap=True):
         self.is_first_cap = is_first_cap
@@ -29,16 +29,17 @@ class ManualCaptainSelect(discord.ui.Select):
         super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
+        # NOTA: O fluxo agora é simplificado para ir direto ao coinflip
         await self.view.process_selection(interaction, self.values[0], self.is_first_cap)
 
 class ManualCaptainView(discord.ui.View):
     def __init__(self, lobby_cog, players, interaction):
-        super().__init__(timeout=120)
+        super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog
         self.players = players
         self.admin_interaction = interaction 
         self.cap1 = None
-        self.add_item(ManualCaptainSelect(players, "Selecione o Capitão 1 (Azul)", True))
+        self.add_item(ManualCaptainSelect(players, "Selecione o Capitão 1", True)) # REMOVIDA SIDE (Azul)
         self.add_cancel_button()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -53,17 +54,21 @@ class ManualCaptainView(discord.ui.View):
             self.cap1 = player
             remaining = [p for p in self.players if p['id'] != player['id']]
             self.clear_items()
-            self.add_item(ManualCaptainSelect(remaining, "Selecione o Capitão 2 (Vermelho)", False))
+            self.add_item(ManualCaptainSelect(remaining, "Selecione o Capitão 2", False)) # REMOVIDA SIDE (Vermelho)
             self.add_cancel_button()
             await interaction.response.edit_message(content=f"✅ Capitão 1 definido: **{player['name']}**. Escolha o segundo:", view=self)
         else:
             cap2 = player
             # LIMPEZA: Remove botões
             await interaction.response.edit_message(content=f"✅ Capitães definidos: **{self.cap1['name']}** vs **{cap2['name']}**", view=None)
+            
+            # MUDANÇA 2: Agora, após escolher os 2, vai direto para o COINFLIP normal
+            # O sistema de coinflip decide quem é priority/secondary.
             await self.lobby_cog.start_coinflip_phase(self.admin_interaction, self.players, self.cap1, cap2)
 
     def add_cancel_button(self):
-        btn = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.secondary, row=2, emoji="✖️")
+        # AJUSTE 3: Contraste melhorado
+        btn = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.secondary, row=2, emoji="✖️") 
         btn.callback = self.cancel_callback
         self.add_item(btn)
 
@@ -78,7 +83,7 @@ class ManualCaptainView(discord.ui.View):
 # --- VIEW 3: O DRAFT ---
 class DraftView(discord.ui.View):
     def __init__(self, lobby_cog, guild_id, cap_blue, cap_red, pool, first_pick_side):
-        super().__init__(timeout=600)
+        super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog 
         self.guild_id = guild_id
         self.cap_blue = cap_blue
@@ -95,7 +100,8 @@ class DraftView(discord.ui.View):
             picker_name = self.cap_blue['name'] if self.turn == 'BLUE' else self.cap_red['name']
             self.add_item(PlayerSelect(self.pool, placeholder=f"Vez de {picker_name} escolher..."))
         
-        cancel_btn = discord.ui.Button(label="Cancelar Draft (Admin)", style=discord.ButtonStyle.secondary, row=2, emoji="✖️")
+        # AJUSTE 3: Contraste melhorado
+        cancel_btn = discord.ui.Button(label="Cancelar Draft (Admin)", style=discord.ButtonStyle.secondary, row=2, emoji="✖️") 
         cancel_btn.callback = self.cancel_callback
         self.add_item(cancel_btn)
 
@@ -186,7 +192,7 @@ class DraftView(discord.ui.View):
 # --- VIEW INTERMEDIÁRIA: ESCOLHA DE LADO (COINFLIP) ---
 class SideSelectView(discord.ui.View):
     def __init__(self, lobby_cog, cap_priority, cap_secondary, pool):
-        super().__init__(timeout=120)
+        super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog
         self.cap_priority = cap_priority
         self.cap_secondary = cap_secondary
@@ -212,11 +218,13 @@ class SideSelectView(discord.ui.View):
     async def blue_side(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.start_draft_phase(interaction, cap_blue=self.cap_secondary, cap_red=self.cap_priority, first_pick_side='RED')
 
-    @discord.ui.button(label="Quero Lado Vermelho", style=discord.ButtonStyle.secondary, emoji="🔴")
+    # AJUSTE 3: Contraste melhorado
+    @discord.ui.button(label="Quero Lado Vermelho", style=discord.ButtonStyle.secondary, emoji="🔴") 
     async def red_side(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.start_draft_phase(interaction, cap_blue=self.cap_priority, cap_red=self.cap_secondary, first_pick_side='BLUE')
 
-    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.secondary, emoji="✖️", row=2)
+    # AJUSTE 3: Contraste melhorado
+    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.secondary, emoji="✖️", row=2) 
     async def cancel_side(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("⛔ Apenas Admins.", ephemeral=True)
@@ -229,7 +237,7 @@ class SideSelectView(discord.ui.View):
 # --- VIEW NOVO: ESCOLHA DE LADO (BALANCEADO) ---
 class BalancedSideSelectView(discord.ui.View):
     def __init__(self, lobby_cog, guild_id, winning_cap, winning_team, losing_cap, losing_team):
-        super().__init__(timeout=180)
+        super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog
         self.guild_id = guild_id
         self.winning_cap = winning_cap
@@ -280,11 +288,13 @@ class BalancedSideSelectView(discord.ui.View):
     async def choose_blue(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.finalize_match(interaction, blue_team=self.winning_team, red_team=self.losing_team)
 
-    @discord.ui.button(label="Escolher RED", style=discord.ButtonStyle.secondary, emoji="🔴")
+    # AJUSTE 3: Contraste melhorado
+    @discord.ui.button(label="Escolher RED", style=discord.ButtonStyle.secondary, emoji="🔴") 
     async def choose_red(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.finalize_match(interaction, blue_team=self.losing_team, red_team=self.winning_team)
 
-    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.secondary, emoji="✖️", row=2)
+    # AJUSTE 3: Contraste melhorado
+    @discord.ui.button(label="Cancelar (Admin)", style=discord.ButtonStyle.secondary, emoji="✖️", row=2) 
     async def cancel_bal(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("⛔ Apenas Admins.", ephemeral=True)
@@ -313,7 +323,8 @@ class LobbyView(discord.ui.View):
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.lobby_cog.process_join(interaction)
 
-    @discord.ui.button(label="Sair", style=discord.ButtonStyle.secondary, emoji="🏃", custom_id="lobby_leave")
+    # AJUSTE 3: Contraste melhorado
+    @discord.ui.button(label="Sair", style=discord.ButtonStyle.secondary, emoji="🏃", custom_id="lobby_leave") 
     async def leave_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.lobby_cog.process_leave(interaction)
 
@@ -331,8 +342,8 @@ class LobbyView(discord.ui.View):
         await interaction.response.send_message("❌ Fila cancelada e lobby reaberto.", ephemeral=True)
 
 
-    # Note que o decorator abaixo define row=1, o que o autoloader usará no modo habilitado.
-    @discord.ui.button(label="Resetar Fila (Admin)", style=discord.ButtonStyle.secondary, emoji="🗑️", custom_id="lobby_reset", row=1)
+    # AJUSTE 3: Contraste melhorado
+    @discord.ui.button(label="Resetar Fila (Admin)", style=discord.ButtonStyle.secondary, emoji="🗑️", custom_id="lobby_reset", row=1) 
     async def reset_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("⛔ Apenas Administradores podem resetar a fila.", ephemeral=True)
@@ -344,7 +355,7 @@ class LobbyView(discord.ui.View):
 # --- VIEW 2: MODO SELECT ---
 class ModeSelectView(discord.ui.View):
     def __init__(self, lobby_cog, players):
-        super().__init__(timeout=None)
+        super().__init__(timeout=900) # AJUSTE 1: Aumentado para 15 minutos (900s)
         self.lobby_cog = lobby_cog
         self.players = players
 
@@ -385,7 +396,8 @@ class ModeSelectView(discord.ui.View):
         await self.cleanup(interaction)
         self.stop()
 
-    @discord.ui.button(label="Capitães (Manual)", style=discord.ButtonStyle.secondary, emoji="👮")
+    # MUDANÇA: O botão manual agora não atribui side, apenas chama a fase de coinflip.
+    @discord.ui.button(label="Capitães (Manual)", style=discord.ButtonStyle.secondary, emoji="👮") 
     async def captains_manual(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.lobby_cog.setup_captains_manual(interaction, self.players)
         await self.cleanup(interaction) 
@@ -418,7 +430,7 @@ class Lobby(commands.Cog):
         self.VOTE_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'] 
 
 
-    def get_queue_embed(self, locked=False, finished_match_id: int = 0): # NOVO: finished_match_id para estado final
+    def get_queue_embed(self, locked=False, finished_match_id: int = 0):
         count = len(self.queue)
         limit = self.QUEUE_LIMIT
         
@@ -426,7 +438,7 @@ class Lobby(commands.Cog):
         if finished_match_id > 0:
             match_ref = f" #{finished_match_id}"
             title = f"❌ LOBBY ENCERRADO | Partida{match_ref}"
-            color = 0xe74c3c # Vermelho para encerrado
+            color = 0xe74c3c
             desc = f"A Partida{match_ref} foi finalizada/anulada. Use `.fila` para a próxima partida."
         elif self.current_match_id > 0:
             match_ref = f" #{self.current_match_id}"
@@ -458,7 +470,7 @@ class Lobby(commands.Cog):
             
         return embed
 
-    async def update_lobby_message(self, interaction: discord.Interaction = None, locked=False, finished_match_id: int = 0): # NOVO: finished_match_id
+    async def update_lobby_message(self, interaction: discord.Interaction = None, locked=False, finished_match_id: int = 0):
         embed = self.get_queue_embed(locked=locked, finished_match_id=finished_match_id)
         
         # A View é desabilitada se o lobby estiver ENCERADO (finished_match_id > 0) 
@@ -579,7 +591,7 @@ class Lobby(commands.Cog):
 
         await self.start_coinflip_phase(interaction, all_participants, cap1, cap2)
 
-    # --- OPÇÃO C: CAPITÃES MANUAL ---
+    # --- OPÇÃO C: CAPITÃES MANUAL (AJUSTADA) ---
     async def setup_captains_manual(self, interaction, players):
         
         # --- DEBUG FILL RESTAURADO ---
@@ -592,6 +604,7 @@ class Lobby(commands.Cog):
             view = ManualCaptainView(self, players, interaction)
         # -----------------------------
         
+        # NOTA: ManualCaptainView agora não se preocupa com sides (Azul/Vermelho)
         await interaction.response.send_message("Selecione os capitães abaixo:", view=view, ephemeral=True)
 
     # --- FASE COMUM (COINFLIP) ---
