@@ -8,9 +8,11 @@ from src.utils.views import BaseInteractiveView
 class Community(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # Cooldown simples em memória para evitar farm de XP (spam)
-        # Formato: {user_id: datetime_ultima_msg}
+        # Cooldown simples em memória para evitar farm de XP (spam de texto)
         self.xp_cooldown = {} 
+        
+        # Dicionário para rastrear tempo de voz: {user_id: datetime_entrada}
+        self.voice_sessions = {}
 
     def generate_progress_bar(self, current, total, length=10):
         """Gera uma barra visual: [████░░░░░░]"""
@@ -32,49 +34,101 @@ class Community(commands.Cog):
         if diff < timedelta(days=30): return "💤 Hibernando"
         return "💀 Morto-Vivo"
 
+    # --- EVENTO DE TEXTO ---
     @commands.Cog.listener()
     async def on_message(self, message):
-        """Engine de Ganho de XP"""
+        """Engine de Ganho de XP por Texto"""
         if message.author.bot: return
         if not message.guild: return
 
         # Checa cooldown (5 segundos entre ganhos de XP)
         last_xp = self.xp_cooldown.get(message.author.id)
         if last_xp and (datetime.utcnow() - last_xp).total_seconds() < 5:
-            return # Mensagem muito rápida, não ganha XP
+            return 
 
-        # XP Aleatório entre 15 e 25
         xp_gain = random.randint(15, 25)
         has_media = len(message.attachments) > 0
         
-        # Salva no banco
         leveled_up, new_level = await CommunityRepository.add_xp(message.author.id, xp_gain, has_media)
-        
-        # Atualiza cooldown
         self.xp_cooldown[message.author.id] = datetime.utcnow()
 
-        # Notifica Level Up (Reação simples para não poluir chat)
         if leveled_up:
             await message.add_reaction("🆙")
-            # Opcional: Mandar mensagem de parabéns
-            # await message.channel.send(f"🎉 {message.author.mention} subiu para o **Nível {new_level}**!")
 
+    # --- EVENTO DE VOZ (NOVO) ---
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        """Engine de Ganho de XP por Voz"""
+        if member.bot: return
+
+        # 1. Entrou em um canal (e não estava em nenhum antes)
+        if before.channel is None and after.channel is not None:
+            # Ignora se entrar mutado/ensurdecido ou no canal de AFK
+            if after.self_mute or after.self_deaf or (member.guild.afk_channel and after.channel.id == member.guild.afk_channel.id):
+                return 
+            
+            self.voice_sessions[member.id] = datetime.utcnow()
+            print(f"[Voice XP] {member.name} entrou no canal {after.channel.name}. Contando...")
+
+        # 2. Saiu de um canal (ou desconectou)
+        elif before.channel is not None and after.channel is None:
+            if member.id in self.voice_sessions:
+                start_time = self.voice_sessions.pop(member.id)
+                duration = datetime.utcnow() - start_time
+                minutes = int(duration.total_seconds() / 60)
+                
+                if minutes >= 1: # Mínimo 1 minuto para ganhar XP
+                    # Cálculo: 10 XP por minuto falado (ajuste como quiser)
+                    xp_earned = minutes * 10 
+                    
+                    leveled_up, new_lvl = await CommunityRepository.add_xp(member.id, xp_earned, has_media=False)
+                    print(f"[Voice XP] {member.name} ganhou {xp_earned} XP por {minutes} minutos em call.")
+                    
+                    # Opcional: Mandar DM ou aviso se upar de nível por voz (pode ser irritante, deixei off)
+
+        # 3. Mudou de status (Mutou/Desmutou no meio da call)
+        elif before.channel is not None and after.channel is not None:
+            # Se o usuário se mutou/ensurdeceu agora: Para de contar
+            if not before.self_mute and after.self_mute:
+                if member.id in self.voice_sessions:
+                    # Calcula o que ganhou até agora e remove da sessão
+                    start_time = self.voice_sessions.pop(member.id)
+                    duration = datetime.utcnow() - start_time
+                    minutes = int(duration.total_seconds() / 60)
+                    if minutes >= 1:
+                        await CommunityRepository.add_xp(member.id, minutes * 10)
+                        print(f"[Voice XP] {member.name} mutou. Sessão encerrada com {minutes * 10} XP.")
+
+            # Se o usuário se desmutou: Começa a contar de novo
+            elif before.self_mute and not after.self_mute:
+                self.voice_sessions[member.id] = datetime.utcnow()
+                print(f"[Voice XP] {member.name} desmutou. Iniciando nova sessão.")
+
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Recupera sessões de voz se o bot reiniciar"""
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
+            for member in guild.voice_channels[0].members if guild.voice_channels else []:
+                # Se o membro já está em call e não está mutado, começa a contar de agora
+                if member.voice and not member.voice.self_mute and not member.voice.self_deaf and not member.bot:
+                     self.voice_sessions[member.id] = datetime.utcnow()
+
+    # --- COMANDOS ---
     @commands.command(name="social", aliases=["perfil_social", "rank", "comunidade"])
     async def social_profile(self, ctx, member: discord.Member = None):
         """Exibe o Cartão de Comunidade do usuário"""
         target = member or ctx.author
         
-        # Busca dados no Banco
         profile = await CommunityRepository.get_profile(target.id)
         
         if not profile:
-            await ctx.reply("📭 Este usuário ainda não possui registro social (precisa mandar mensagens no chat).")
+            await ctx.reply("📭 Este usuário ainda não possui registro social (precisa interagir no servidor).")
             return
 
-        # Busca Posição no Ranking
         rank_pos = await CommunityRepository.get_ranking_position(target.id)
         
-        # Cores baseadas no status do Discord
         status_color = {
             discord.Status.online: 0x2ecc71,
             discord.Status.idle: 0xf1c40f,
@@ -83,12 +137,10 @@ class Community(commands.Cog):
         }.get(target.status, 0x2b2d31)
 
         embed = discord.Embed(color=status_color)
-        
-        # Cabeçalho
         embed.set_author(name=f"Perfil da Comunidade: {target.display_name}", icon_url=target.display_avatar.url)
         embed.set_thumbnail(url=target.display_avatar.url)
 
-        # --- BARRA DE PROGRESSO E NÍVEL ---
+        # Calcula XP para próximo nível
         xp_next_level = int(profile.level * 100 * 1.2)
         progress_bar = self.generate_progress_bar(profile.xp, xp_next_level)
         
@@ -98,7 +150,6 @@ class Community(commands.Cog):
             inline=False
         )
 
-        # --- ESTATÍSTICAS ---
         stats_text = (
             f"🏆 **Rank:** #{rank_pos}\n"
             f"💬 **Mensagens:** {profile.messages_sent}\n"
@@ -106,14 +157,9 @@ class Community(commands.Cog):
         )
         embed.add_field(name="📊 Estatísticas", value=stats_text, inline=True)
 
-        # --- INFOS DO DISCORD ---
-        # Pega o cargo mais alto (excluindo @everyone)
         top_role = target.top_role.mention if target.top_role.name != "@everyone" else "Sem Cargo"
-        
-        # Formata datas
         joined_at = f"<t:{int(target.joined_at.timestamp())}:R>" if target.joined_at else "N/A"
         created_at = f"<t:{int(target.created_at.timestamp())}:D>"
-        
         activity_status = self.get_activity_status(profile.last_message_at)
 
         info_text = (
@@ -123,11 +169,8 @@ class Community(commands.Cog):
             f"📡 **Status:** {activity_status}"
         )
         embed.add_field(name="🆔 Identidade", value=info_text, inline=True)
-
-        # --- FOOTER ---
-        embed.set_footer(text="Mande mensagens para ganhar XP • Imagens dão bônus!")
+        embed.set_footer(text="Ganhe XP conversando e participando de Calls!")
         
-        # Usa a BaseView para ter o timeout caso queira adicionar botões futuros
         view = BaseInteractiveView(timeout=60)
         view.message = await ctx.reply(embed=embed, view=view)
 
