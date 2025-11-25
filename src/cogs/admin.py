@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import asyncio
-import logging # Adicionado para logging
+import logging
 
 logger = logging.getLogger("admin")
 
@@ -39,12 +39,11 @@ class ClearConfirmationView(discord.ui.View):
         
         try:
             await interaction.response.edit_message(
-                content="🔄 Iniciando limpeza... Aguarde (o bot pode demorar dependendo do volume).", 
+                content="🔄 Iniciando limpeza... Aguarde (Isso pode ser rápido ou demorar se houver muitas mensagens antigas).", 
                 view=self # Edita com os botões desativados
             )
         except Exception as e:
             logger.error(f"Falha ao editar mensagem de progresso: {e}")
-            # Se a interação falhar aqui, executamos a limpeza mesmo assim, mas o feedback visual será perdido.
             pass
 
         try:
@@ -53,7 +52,11 @@ class ClearConfirmationView(discord.ui.View):
             
             # 3. Limpeza Final: Apaga a mensagem de confirmação e a mensagem original do comando.
             # Nota: Apagamos a mensagem do comando original ctx.message antes do feedback final.
-            await self.ctx.message.delete()
+            try:
+                await self.ctx.message.delete()
+            except:
+                pass # Ignora se já foi apagada
+            
             await interaction.message.delete()
             
             # 4. Envia feedback final (delete_after garante que não fique spam)
@@ -61,7 +64,7 @@ class ClearConfirmationView(discord.ui.View):
 
         except Exception as e:
             logger.error(f"Erro fatal na execução da limpeza: {e}")
-            await self.ctx.channel.send(f"⛔ ERRO FATAL: Falha ao apagar mensagens. Verifique as permissões do bot. Detalhe: {e}", delete_after=10)
+            await self.ctx.channel.send(f"⛔ ERRO FATAL: Falha ao apagar mensagens. Detalhe: {e}", delete_after=10)
 
 
     @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary)
@@ -91,15 +94,18 @@ class Admin(commands.Cog):
         # Define o filtro
         if mode == 'bot':
             check = is_bot_message
+            # Se for só mensagens do bot, geralmente queremos olhar um range maior, 
+            # mas ainda assim LIMITADO para não travar.
+            limit_val = 1000 
         else: # mode == 'all'
             # Filtro: Apaga TODAS as mensagens
             check = lambda m: True
+            limit_val = 1000 # Limite de segurança padrão
 
         try:
             # Apaga as mensagens em lote
-            # O limit=None tenta apagar o máximo permitido pelo Discord (geralmente 14 dias atrás)
-            # Retorna uma lista de mensagens deletadas
-            deleted = await ctx.channel.purge(limit=None, check=check, before=ctx.message)
+            # ALTERADO: limit=None removido. Usando limit_val para performance.
+            deleted = await ctx.channel.purge(limit=limit_val, check=check, before=ctx.message)
             return len(deleted)
 
         except discord.Forbidden:
@@ -113,14 +119,18 @@ class Admin(commands.Cog):
     @commands.command(name="clear")
     @commands.has_permissions(administrator=True)
     async def clear_bot_messages(self, ctx: commands.Context):
-        """Apaga apenas as mensagens enviadas por este bot no canal."""
+        """Apaga apenas as mensagens enviadas por este bot no canal (Últimas 100)."""
         
         try:
+            # CORREÇÃO: Instanciar a view numa variável para não perder a referência
+            view = ClearConfirmationView(self, ctx, 'bot')
+            
             # Envia a confirmação
-            confirmation_message = await ctx.reply("⚠️ Tem certeza que deseja apagar **apenas as mensagens do BOT** neste canal?", 
-                                                    view=ClearConfirmationView(self, ctx, 'bot'))
-            # Captura a referência para o on_timeout
-            ClearConfirmationView(self, ctx, 'bot').message = confirmation_message
+            confirmation_message = await ctx.reply("⚠️ Tem certeza que deseja apagar **apenas as mensagens do BOT** (nas últimas 100 msgs)?", 
+                                                    view=view)
+            
+            # Captura a referência para o on_timeout corretamente
+            view.message = confirmation_message
         except Exception as e:
             logger.error(f"Erro ao enviar confirmação de clear: {e}")
 
@@ -128,14 +138,18 @@ class Admin(commands.Cog):
     @commands.command(name="clear_all")
     @commands.has_permissions(administrator=True)
     async def clear_all_messages(self, ctx: commands.Context):
-        """Apaga TODAS as mensagens de todos os usuários no canal (Admin)."""
+        """Apaga TODAS as mensagens de todos os usuários no canal (Últimas 100)."""
         
         try:
+            # CORREÇÃO: Instanciar a view numa variável
+            view = ClearConfirmationView(self, ctx, 'all')
+
             # Envia a confirmação
-            confirmation_message = await ctx.reply("🔴 ATENÇÃO! Tem certeza que deseja apagar **TODAS** as mensagens neste canal? Esta ação é IRREVERSÍVEL.", 
-                                                    view=ClearConfirmationView(self, ctx, 'all'))
-            # Captura a referência para o on_timeout
-            ClearConfirmationView(self, ctx, 'all').message = confirmation_message
+            confirmation_message = await ctx.reply("🔴 ATENÇÃO! Tem certeza que deseja apagar **as últimas 100 mensagens** neste canal?", 
+                                                    view=view)
+            
+            # Captura a referência para o on_timeout corretamente
+            view.message = confirmation_message
         except Exception as e:
             logger.error(f"Erro ao enviar confirmação de clear_all: {e}")
 

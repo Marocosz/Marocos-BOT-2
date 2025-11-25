@@ -1,10 +1,11 @@
 import discord
 import asyncio
+import urllib.parse # <--- Adicionado para corrigir links com caracteres especiais
 from discord.ext import commands
 from src.database.repositories import PlayerRepository
 from src.services.riot_api import RiotAPI
 from src.services.matchmaker import MatchMaker
-from src.utils.views import BaseInteractiveView # <-- Importa a Base View
+from src.utils.views import BaseInteractiveView 
 
 # --- VIEW DE PAGINAÇÃO ---
 class RankingPaginationView(BaseInteractiveView): 
@@ -460,7 +461,7 @@ class Ranking(commands.Cog):
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO 5: LIVE (CORRIGIDO PUUID) ---
+    # --- COMANDO 5: LIVE (CORRIGIDO PUUID + URL OPGG) ---
     @commands.command(name="live")
     async def live(self, ctx, jogador: discord.Member = None):
         """Verifica se o jogador está em partida agora"""
@@ -499,7 +500,13 @@ class Ranking(commands.Cog):
         embed.add_field(name="Modo", value=mode, inline=True)
         embed.add_field(name="Início", value=duration, inline=True)
         
-        opgg_live = f"https://www.op.gg/summoners/br/{player.riot_name.replace('#', '-')}/ingame"
+        # --- CORREÇÃO DE URL PARA NOMES COM ESPAÇO/CARACTERES ---
+        # 1. Substitui # por - (Padrão Riot/OP.GG)
+        formatted_name = player.riot_name.replace('#', '-')
+        # 2. Codifica espaços e caracteres especiais (ツ -> %E3%83%84) para o link não quebrar
+        safe_url = urllib.parse.quote(formatted_name)
+        
+        opgg_live = f"https://www.op.gg/summoners/br/{safe_url}/ingame"
         embed.add_field(name="Links", value=f"[🎥 Assistir no OP.GG]({opgg_live})", inline=False)
 
         await ctx.reply(embed=embed)
