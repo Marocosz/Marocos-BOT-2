@@ -36,6 +36,21 @@ class Community(commands.Cog):
         if diff < timedelta(days=30): return "🔴 **Ausente**"
         return "💀 **Inativo**"
 
+    # --- MÉTODO AUXILIAR (NOVO) ---
+    async def _finish_voice_session(self, member):
+        """Finaliza a sessão de um membro, calcula XP e remove do tracker."""
+        if member.id in self.voice_sessions:
+            start_time = self.voice_sessions.pop(member.id)
+            duration = datetime.utcnow() - start_time
+            minutes = int(duration.total_seconds() / 60)
+            
+            if minutes >= 1: 
+                xp_earned = minutes * 10 
+                await CommunityRepository.add_xp(member.id, xp_earned, has_media=False, voice_minutes=minutes)
+                print(f"[Voice] {member.name} ganhou {xp_earned} XP (Sessão finalizada).")
+            return True
+        return False
+
     # --- EVENTO DE TEXTO ---
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -58,54 +73,82 @@ class Community(commands.Cog):
         if leveled_up:
             await message.add_reaction("🆙")
 
-    # --- EVENTO DE VOZ ---
+    # --- EVENTO DE VOZ (LÓGICA REVISADA) ---
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
-        """Engine de Ganho de XP por Voz"""
+        """Engine de Ganho de XP por Voz com verificação de 2+ pessoas"""
         if member.bot: return
 
-        # 1. Entrou em um canal
-        if before.channel is None and after.channel is not None:
-            # Ignora se entrar mutado/ensurdecido ou no canal de AFK
-            if after.self_mute or after.self_deaf or (member.guild.afk_channel and after.channel.id == member.guild.afk_channel.id):
-                return 
+        # --- LÓGICA DE SAÍDA / MUDANÇA DE STATUS (MUTE) ---
+        # Se saiu de um canal OU se mutou (consideramos mute como 'parar de contar')
+        if (before.channel is not None and after.channel is None) or \
+           (before.channel is not None and not before.self_mute and after.self_mute) or \
+           (before.channel is not None and before.channel != after.channel):
             
-            self.voice_sessions[member.id] = datetime.utcnow()
-            print(f"[Voice] {member.name} entrou.")
+            # 1. Finaliza a sessão de quem saiu/mutou
+            await self._finish_voice_session(member)
 
-        # 2. Saiu de um canal
-        elif before.channel is not None and after.channel is None:
-            if member.id in self.voice_sessions:
-                start_time = self.voice_sessions.pop(member.id)
-                duration = datetime.utcnow() - start_time
-                minutes = int(duration.total_seconds() / 60)
+            # 2. Verifica quem ficou no canal anterior (se houver canal anterior)
+            old_channel = before.channel
+            if old_channel:
+                # Filtra apenas humanos
+                valid_members = [m for m in old_channel.members if not m.bot]
                 
-                if minutes >= 1: 
-                    xp_earned = minutes * 10 
-                    await CommunityRepository.add_xp(member.id, xp_earned, has_media=False, voice_minutes=minutes)
-                    print(f"[Voice] {member.name} ganhou {xp_earned} XP.")
+                # Se sobrou MENOS de 2 pessoas (ou seja, alguém ficou sozinho), para de contar para ele
+                if len(valid_members) < 2:
+                    for remaining_member in valid_members:
+                        if remaining_member.id in self.voice_sessions:
+                            await self._finish_voice_session(remaining_member)
+                            print(f"[Voice] Contagem parada para {remaining_member.name} (Ficou sozinho).")
 
-        # 3. Mudou de status
-        elif before.channel is not None and after.channel is not None:
-            if not before.self_mute and after.self_mute:
-                if member.id in self.voice_sessions:
-                    start_time = self.voice_sessions.pop(member.id)
-                    duration = datetime.utcnow() - start_time
-                    minutes = int(duration.total_seconds() / 60)
-                    if minutes >= 1:
-                        await CommunityRepository.add_xp(member.id, minutes * 10, voice_minutes=minutes)
+        # --- LÓGICA DE ENTRADA / RETORNO DE MUTE ---
+        # Se entrou em um canal OU desmutou
+        if (after.channel is not None and before.channel is None) or \
+           (after.channel is not None and before.self_mute and not after.self_mute) or \
+           (after.channel is not None and before.channel != after.channel):
+            
+            current_channel = after.channel
+            
+            # Verificações básicas (AFK, Mute, Deaf)
+            if after.self_mute or after.self_deaf or (member.guild.afk_channel and current_channel.id == member.guild.afk_channel.id):
+                return
 
-            elif before.self_mute and not after.self_mute:
-                self.voice_sessions[member.id] = datetime.utcnow()
+            # 3. Verifica regra de 2+ Pessoas
+            valid_members = [m for m in current_channel.members if not m.bot]
+            
+            if len(valid_members) >= 2:
+                # Inicia sessão para quem entrou (se já não estiver contando)
+                if member.id not in self.voice_sessions:
+                    self.voice_sessions[member.id] = datetime.utcnow()
+                    print(f"[Voice] {member.name} começou a ganhar XP (Canal com {len(valid_members)} pessoas).")
+
+                # 4. CRÍTICO: Inicia sessão para quem já estava lá (que estava sozinho e não contando)
+                for existing_member in valid_members:
+                    if existing_member.id != member.id: # Não é quem acabou de entrar
+                        # Se ele não está mutado/surdo e não está na sessão, começa agora
+                        if not existing_member.voice.self_mute and not existing_member.voice.self_deaf:
+                            if existing_member.id not in self.voice_sessions:
+                                self.voice_sessions[existing_member.id] = datetime.utcnow()
+                                print(f"[Voice] {existing_member.name} começou a ganhar XP (Chegou companhia).")
 
     @commands.Cog.listener()
     async def on_ready(self):
-        """Recupera sessões de voz se o bot reiniciar"""
+        """Recupera sessões de voz se o bot reiniciar, respeitando a regra de 2+ pessoas"""
         await self.bot.wait_until_ready()
+        
+        self.voice_sessions = {} # Limpa para garantir consistência
+
         for guild in self.bot.guilds:
-            for member in guild.voice_channels[0].members if guild.voice_channels else []:
-                if member.voice and not member.voice.self_mute and not member.voice.self_deaf and not member.bot:
-                     self.voice_sessions[member.id] = datetime.utcnow()
+            # Itera sobre TODOS os canais de voz, não só o primeiro
+            for channel in guild.voice_channels:
+                valid_members = [m for m in channel.members if not m.bot]
+                
+                # Só recupera sessão se tiver 2 ou mais pessoas no canal
+                if len(valid_members) >= 2:
+                    for member in valid_members:
+                        if member.voice and not member.voice.self_mute and not member.voice.self_deaf:
+                             self.voice_sessions[member.id] = datetime.utcnow()
+                             print(f"[Voice Restore] Sessão recuperada para {member.name}")
 
     # --- COMANDO SOCIAL (DESIGN PREMIUM REVISADO) ---
     @commands.command(name="social", aliases=["perfil_social", "rank", "comunidade"])
