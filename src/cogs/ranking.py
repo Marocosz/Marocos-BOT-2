@@ -4,10 +4,10 @@ from discord.ext import commands
 from src.database.repositories import PlayerRepository
 from src.services.riot_api import RiotAPI
 from src.services.matchmaker import MatchMaker
-from src.utils.views import BaseInteractiveView # <-- NOVO: Importa a Base View
+from src.utils.views import BaseInteractiveView # <-- Importa a Base View
 
-# --- VIEW DE PAGINAÇÃO (MODIFICADA PARA HERANÇA) ---
-class RankingPaginationView(BaseInteractiveView): # <-- HERDA DA BASE
+# --- VIEW DE PAGINAÇÃO ---
+class RankingPaginationView(BaseInteractiveView): 
     def __init__(self, players, ctx, per_page=10): 
         # O timeout de 120s (2 min) é mantido, passando-o para a Base
         super().__init__(timeout=120) 
@@ -202,7 +202,8 @@ class Ranking(commands.Cog):
                     
                 
                 # Se Unranked total, atualiza com MMR base
-                if not solo_rank_data and not flex_rank_data and mmr_source:
+                if not next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None) and \
+                   not next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None) and mmr_source:
                     await PlayerRepository.update_riot_rank(player.discord_id, "UNRANKED", "", 0, 0, 0, 1000)
 
                 # Rebusca o objeto Player do banco para refletir TODAS as atualizações
@@ -229,8 +230,11 @@ class Ranking(commands.Cog):
             
             # --- CORREÇÃO DE LINK OP.GG ---
             name_and_tag = player.riot_name 
+            # 1. Substitui espaços por hífens
             url_friendly_name = name_and_tag.replace(' ', '-')
+            # 2. Substitui # por hífen
             final_url_path = url_friendly_name.replace('#', '-')
+            
             riot_link = f"[{name_and_tag}](https://www.op.gg/summoners/br/{final_url_path})"
             # -----------------------------
             
@@ -267,16 +271,16 @@ class Ranking(commands.Cog):
                     m_list.append(f"`#{i+1}` **{name}** (M{c['championLevel']}) • {pts_str}")
                 embed.add_field(name="🔥 Top Maestrias", value="\n".join(m_list), inline=False)
 
-            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
             
             total_ih = player.wins + player.losses
             wr_ih = (player.wins / total_ih * 100) if total_ih > 0 else 0.0
             
             stats_block = (
                 f"```yaml\n"
-                f"MMR: {player.mmr}\n"
+                f"MMR:  {player.mmr}\n"
                 f"Jogos: {total_ih}\n"
-                f"V/D: {player.wins} - {player.losses}\n"
+                f"V/D:  {player.wins} - {player.losses}\n"
                 f"Win%: {wr_ih:.1f}%\n"
                 f"```"
             )
@@ -286,7 +290,7 @@ class Ranking(commands.Cog):
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO 3: MMR (AUDITORIA DETALHADA) ---
+    # --- COMANDO 3: MMR (AUDITORIA DETALHADA + SALVA) ---
     @commands.command(name="mmr")
     async def mmr(self, ctx, jogador: discord.Member = None):
         """Relatório detalhado da pontuação"""
@@ -347,6 +351,21 @@ class Ranking(commands.Cog):
         final = int(base_adjusted + bonus)
         final = max(0, final)
 
+        # --- CORREÇÃO: SALVA O MMR CALCULADO NO BANCO ---
+        queue_type_str = 'RANKED_FLEX_SR' if is_flex else 'RANKED_SOLO_5x5'
+        
+        await PlayerRepository.update_riot_rank(
+            discord_id=player.discord_id,
+            tier=data['tier'],
+            rank=data['rank'],
+            lp=data['leaguePoints'],
+            wins=data['wins'],
+            losses=data['losses'],
+            calculated_mmr=final, # Salva o valor calculado
+            queue_type=queue_type_str
+        )
+        # ------------------------------------------------
+
         # Montagem do Embed
         embed = discord.Embed(title=f"🧮 Extrato de MMR: {player.riot_name}", color=0x2b2d31)
         
@@ -365,7 +384,7 @@ class Ranking(commands.Cog):
             
         embed.add_field(name="2️⃣ Ajuste de Fila", value=f"{q_text}{q_desc}", inline=True)
         
-        embed.add_field(name="\u200b", value="\u200b", inline=False)
+        embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
 
         sinal = "+" if bonus >= 0 else ""
         perf_explain = (
@@ -379,8 +398,8 @@ class Ranking(commands.Cog):
 
         formula_visual = (
             f"```ini\n"
-            f"[ Base Ajustada ] [ Bônus WR ]  [ MMR FINAL ]\n"
-            f" {base_adjusted:<5}  + {bonus:<5}  = {final}\n"
+            f"[ Base Ajustada ]  [ Bônus WR ]   [ MMR FINAL ]\n"
+            f"  {base_adjusted:<5}    +  {bonus:<5}   =  {final}\n"
             f"```"
         )
         
@@ -441,7 +460,7 @@ class Ranking(commands.Cog):
 
             await ctx.reply(embed=embed)
 
-    # --- COMANDO 5: LIVE (MANTIDO INTACTO) ---
+    # --- COMANDO 5: LIVE (CORRIGIDO PUUID) ---
     @commands.command(name="live")
     async def live(self, ctx, jogador: discord.Member = None):
         """Verifica se o jogador está em partida agora"""
@@ -452,16 +471,8 @@ class Ranking(commands.Cog):
             await ctx.reply("❌ Jogador não registrado.")
             return
 
-        # 1. Obter Summoner ID do PUUID
-        summoner_data = await self.riot_service.get_summoner_by_puuid(player.riot_puuid)
-        if not summoner_data:
-            await ctx.reply("❌ Não foi possível obter os dados da conta Riot. Tente `.perfil`.")
-            return
-            
-        summoner_id = summoner_data.get('id')
-        
-        # 2. Usar Summoner ID para buscar a partida ativa (Fluxo CORRETO)
-        data = await self.riot_service.get_active_game(summoner_id)
+        # CORREÇÃO: Usar PUUID diretamente, não Summoner ID
+        data = await self.riot_service.get_active_game(player.riot_puuid)
         
         if not data:
             await ctx.reply(f"💤 **{player.riot_name}** não está jogando no momento.")
