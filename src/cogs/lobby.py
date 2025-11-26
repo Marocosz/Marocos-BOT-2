@@ -176,9 +176,11 @@ class DraftView(BaseInteractiveView): # HERDA DA BASE
         await interaction.response.edit_message(embed=embed, view=None)
         self.stop()
         # MUDANÇA: Não chama reset_lobby_state, pois a partida NÃO FOI FINALIZADA OFICIALMENTE AINDA (.resultado que faz isso)
-        # Apenas limpamos o ID da partida
+        # Apenas limpamos o ID da partida e resetamos o estado de Lock
         self.lobby_cog.current_match_id = 0 
-        await self.lobby_cog.update_lobby_message(locked=True) # Trava o painel principal, mas não o transforma na próxima fila.
+        await self.lobby_cog.update_lobby_message(locked=True) # Trava o painel principal
+        # IMPORTANTE: Liberamos o lock apenas quando o resultado for dado ou resetado, 
+        # mas aqui o lobby já foi consumido, então o update_lobby_message(locked=True) vai mostrar "LOBBY FECHADO".
 
     def get_embed(self):
         color = 0x3498db if self.turn == 'BLUE' else 0xe74c3c
@@ -218,13 +220,7 @@ class SideSelectView(BaseInteractiveView): # HERDA DA BASE
         
         # AQUI PRECISAMOS SALVAR A REFERÊNCIA DA MENSAGEM DO DRAFTVIEW!
         sent_message = await interaction.response.send_message(embed=view.get_embed(), view=view)
-        # NOTA: interaction.response.send_message não retorna a mensagem. 
-        # Precisa ser interaction.followup.send() APÓS defer/edit, ou usar view.message = await interaction.original_response()
-        # Mas para simplificar, vamos assumir que a próxima mensagem enviada é a do Draft.
         
-        # Para Views complexas como esta, vamos salvar a referência no método que a cria (start_coinflip_phase),
-        # mas aqui não há como evitar o .message = None inicial, a não ser que a View seja editada.
-
     @discord.ui.button(label="Quero Lado Azul", style=discord.ButtonStyle.primary, emoji="🔵")
     async def blue_side(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.start_draft_phase(interaction, cap_blue=self.cap_secondary, cap_red=self.cap_priority, first_pick_side='RED')
@@ -441,6 +437,8 @@ class Lobby(commands.Cog):
         
         self.VOTE_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'] 
 
+        # NOVO: Variável de controle para TRAVAR o comando .fila quando já existe processo de criação
+        self.lobby_locked = False
 
     def get_queue_embed(self, locked=False, finished_match_id: int = 0):
         count = len(self.queue)
@@ -483,6 +481,10 @@ class Lobby(commands.Cog):
         return embed
 
     async def update_lobby_message(self, interaction: discord.Interaction = None, locked=False, finished_match_id: int = 0):
+        # Atualiza o status interno de travamento
+        if locked:
+            self.lobby_locked = True
+        
         embed = self.get_queue_embed(locked=locked, finished_match_id=finished_match_id)
         
         # A View é desabilitada se o lobby estiver ENCERADO (finished_match_id > 0) 
@@ -500,8 +502,9 @@ class Lobby(commands.Cog):
     async def reset_lobby_state(self, finished_match_id: int = 0):
         """Reinicia o estado da fila e atualiza a mensagem principal."""
         
-        # 1. Limpa a fila
+        # 1. Limpa a fila e libera o Lock
         self.queue = []
+        self.lobby_locked = False
         
         # 2. Se uma partida foi finalizada/anulada (ID > 0), imobilizamos o card atual
         if finished_match_id > 0:
@@ -772,26 +775,25 @@ class Lobby(commands.Cog):
         if self.current_match_id > 0 and await MatchRepository.get_match_details(self.current_match_id):
             return await ctx.reply(f"⚠️ Já existe uma partida em andamento (ID #{self.current_match_id}). Finalize-a antes de criar uma nova fila.")
         
-        # 2. OBTENDO O PRÓXIMO ID PARA EXIBIÇÃO (Se a fila estava limpa, inicia em 1)
+        # 2. CHECAGEM (NOVO): Se o lobby estiver em modo 'locked' (Draft/Setup), impede .fila
+        if self.lobby_locked:
+            return await ctx.reply("⚠️ Um lobby já está sendo configurado (Draft/Setup). Aguarde ou cancele o atual.")
+
+        # 3. OBTENDO O PRÓXIMO ID PARA EXIBIÇÃO (Se a fila estava limpa, inicia em 1)
         if self.current_match_id == 0:
-            # Se o ID for 0 (primeira partida), define como 1
             self.current_match_id = 1
         
-        # 3. Se o card da fila anterior ainda existir (mas estiver ENCERRADO), ele deve ser deletado.
+        # 4. LIMPEZA DA MENSAGEM ANTERIOR (CORREÇÃO DE DUPLICIDADE)
+        # Se existe uma mensagem anterior, tentamos deletar ela para não ficar duplicada no chat.
         if self.lobby_message:
             try: await self.lobby_message.delete()
             except: pass
         
         embed = self.get_queue_embed()
         view = LobbyView(self)
-        await ctx.send(embed=embed, view=view) # MUDANÇA AQUI
-        # NOTA: O self.lobby_message precisa ser atribuído após o envio para capturar a referência
-        self.lobby_message = await ctx.fetch_message(ctx.channel.last_message_id) # Não é ideal, mas funciona se ctx.send não retorna
-        # CORREÇÃO: ctx.send() retorna a mensagem enviada
         
-        # Correção para o uso do ctx.send
-        if self.lobby_message: # Se foi deletada a anterior, ctx.send() enviará uma nova
-             self.lobby_message = await ctx.send(embed=embed, view=view)
+        # ENVIA E SALVA A REFERÊNCIA (APENAS UMA VEZ)
+        self.lobby_message = await ctx.send(embed=embed, view=view)
 
 
     @commands.command(name="resetar")
