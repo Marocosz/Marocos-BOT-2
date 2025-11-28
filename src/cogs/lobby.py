@@ -7,6 +7,12 @@ import asyncio
 # NOVO: Importa a Base View
 from src.utils.views import BaseInteractiveView 
 
+# --- IMPORTS PARA PERSISTÊNCIA DE ESTADO ---
+from sqlalchemy import select, func
+from src.database.config import get_session
+from src.database.models import Match as MatchModel # Alias para não confundir com a classe do discord se houvesse
+# -------------------------------------------
+
 
 # --- COMPONENTE DE SELEÇÃO DE JOGADOR (PICK) ---
 class PlayerSelect(discord.ui.Select):
@@ -440,6 +446,28 @@ class Lobby(commands.Cog):
         # NOVO: Variável de controle para TRAVAR o comando .fila quando já existe processo de criação
         self.lobby_locked = False
 
+        # --- INICIALIZAÇÃO DA PERSISTÊNCIA DE ID ---
+        self.bot.loop.create_task(self.initialize_match_id())
+
+    # --- MÉTODO PARA RECUPERAR O ÚLTIMO ID NO BANCO ---
+    async def initialize_match_id(self):
+        """
+        Busca no banco o maior ID de partida existente e define o próximo.
+        Isso evita que o ID reinicie para 1 quando o bot reinicia.
+        """
+        try:
+            async with get_session() as session:
+                # Seleciona o maior ID da tabela matches
+                stmt = select(func.max(MatchModel.id))
+                result = await session.execute(stmt)
+                last_id = result.scalar() or 0 # Se for None (banco vazio), retorna 0
+                
+                self.current_match_id = last_id + 1
+                print(f"✅ [Lobby] Estado recuperado. Próxima partida será a #{self.current_match_id}")
+        except Exception as e:
+            print(f"❌ [Lobby] Erro ao recuperar ID da partida: {e}")
+            self.current_match_id = 1 # Fallback
+
     def get_queue_embed(self, locked=False, finished_match_id: int = 0):
         count = len(self.queue)
         limit = self.QUEUE_LIMIT
@@ -780,6 +808,7 @@ class Lobby(commands.Cog):
             return await ctx.reply("⚠️ Um lobby já está sendo configurado (Draft/Setup). Aguarde ou cancele o atual.")
 
         # 3. OBTENDO O PRÓXIMO ID PARA EXIBIÇÃO (Se a fila estava limpa, inicia em 1)
+        # NOTA: O self.initialize_match_id já deve ter rodado, mas se falhou, isso garante.
         if self.current_match_id == 0:
             self.current_match_id = 1
         

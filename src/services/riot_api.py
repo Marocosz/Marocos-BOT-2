@@ -1,5 +1,6 @@
 import aiohttp
 import os
+import asyncio
 from urllib.parse import quote
 
 class RiotAPI:
@@ -10,6 +11,8 @@ class RiotAPI:
         self.platform_region = "br1"
         self.ddragon_version = "14.1.1" # Valor inicial, será atualizado dinamicamente
         self.champ_map = {}
+        # Semáforo para limitar requisições simultâneas (Evita picos que causam 429)
+        self.semaphore = asyncio.Semaphore(10) 
 
     async def _request(self, url: str):
         headers = {"X-Riot-Token": self.api_key}
@@ -17,23 +20,31 @@ class RiotAPI:
         # DEBUG – você pode remover depois
         print(f"[RIOT API] GET -> {url}")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
+        async with self.semaphore: # Entra na fila do semáforo
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
 
-                if response.status == 200:
-                    return await response.json()
+                    if response.status == 200:
+                        return await response.json()
 
-                elif response.status == 403:
-                    print("⛔ ERRO 403: API Key expirada.")
-                    return None
+                    elif response.status == 429:
+                        # Tratamento de Rate Limit
+                        retry_after = int(response.headers.get("Retry-After", 5))
+                        print(f"⚠️ Rate Limit (429)! Esperando {retry_after}s para tentar novamente...")
+                        await asyncio.sleep(retry_after)
+                        return await self._request(url) # Tenta novamente recursivamente
 
-                elif response.status == 404:
-                    # print("⚠️ ERRO 404: Recurso não encontrado.") # Silenciado para evitar spam no log de match
-                    return None 
+                    elif response.status == 403:
+                        print("⛔ ERRO 403: API Key expirada.")
+                        return None
 
-                else:
-                    print(f"⚠️ Erro {response.status}: {url}")
-                    return None
+                    elif response.status == 404:
+                        # print("⚠️ ERRO 404: Recurso não encontrado.") # Silenciado para evitar spam no log de match
+                        return None 
+
+                    else:
+                        print(f"⚠️ Erro {response.status}: {url}")
+                        return None
 
     # --- MÉTODOS DE CONTA E SUMMONER (Mantidos) ---
 
