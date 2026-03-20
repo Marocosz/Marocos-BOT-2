@@ -13,6 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Isso inclui o diretório 'src', 'data', e scripts na raiz
 COPY . .
 
-# Comando para rodar o bot
-# O Coolify irá gerenciar as variáveis de ambiente (RIOT_API_KEY, DATABASE_URL, etc.)
-CMD [ "python", "-m", "src.main" ]
+# Roda migrações e inicia o bot
+# update_db.py é idempotente: ignora colunas que já existem
+CMD ["sh", "-c", "python update_db.py && python -m src.main"]

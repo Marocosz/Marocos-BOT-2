@@ -1,0 +1,34 @@
+# Liga Interna — Atualização v2.0
+
+## Novos Comandos
+
+**`.historico_liga`** (alias `.hliga`) — seus últimos 10 jogos internos com resultado (V/D), lado jogado e data relativa
+
+**`.partida <ID>`** — detalhes completos de qualquer partida: composição dos times, MMR de cada jogador na época, resultado e timestamps
+
+**`.h2h @user1 @user2`** — confronto direto entre dois jogadores: histórico como adversários (WR individual), como parceiros (WR juntos) e últimas partidas em comum
+
+**`.recalcular_mmr`** *(admin)* — recalcula o MMR de todos os jogadores registrados com base no rank salvo, sem chamar a Riot API
+
+## Melhorias
+
+**MMR imediato após resultado**
+O MMR agora é atualizado imediatamente após o `.resultado`, sem aguardar a task de rastreamento de 10 minutos.
+
+**Streaks de vitórias**
+Sequências de vitórias são rastreadas por jogador. Marcos de **3, 5, 7, 10, 15 e 20** vitórias seguidas são anunciados automaticamente no canal. A sequência atual aparece no `.ranking` com 🔥 e no `.perfil`.
+
+**MVP e iMVP salvos no perfil**
+Os títulos de MVP e iMVP agora são registrados no banco de dados. O `.perfil` passa a exibir quantas vezes cada jogador foi votado como MVP (melhor do vencedor) ou iMVP (pior do perdedor).
+
+**Fila persistente**
+A fila de jogadores agora sobrevive a reinicializações do bot. Se o bot cair com uma fila aberta, ela é restaurada automaticamente quando ele voltar.
+
+**Notificação de level up**
+Ao subir de nível no sistema de comunidade, o bot envia um embed de parabéns no canal com o novo nível e o XP necessário para o próximo.
+
+## Correções
+
+**`.registrar`** — a ordem das lanes agora é intuitiva: `.registrar Nick#TAG Mid Top` define **Mid** como principal e **Top** como secundária (antes a lógica era invertida)
+
+**Votação MVP/iMVP** — corrigido bug onde a própria reação do bot era contada como voto, inflando o resultado

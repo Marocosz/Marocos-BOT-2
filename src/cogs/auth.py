@@ -2,17 +2,16 @@ import discord
 import random
 from discord.ext import commands
 import unicodedata
-from src.utils.views import BaseInteractiveView 
+from src.utils.views import BaseInteractiveView
 
 from src.services.riot_api import RiotAPI
-from src.services.matchmaker import MatchMaker # <-- NOVO IMPORT
+from src.services.matchmaker import MatchMaker
 from src.database.repositories import PlayerRepository
 
 
-# View do Botão (Herdando da Base)
-class VerifyView(BaseInteractiveView): 
+class VerifyView(BaseInteractiveView):
     def __init__(self, bot, ctx, riot_service, puuid, target_icon_id, account_data, lanes):
-        super().__init__(timeout=180) 
+        super().__init__(timeout=180)
         self.bot = bot
         self.ctx = ctx
         self.riot_service = riot_service
@@ -36,39 +35,33 @@ class VerifyView(BaseInteractiveView):
             if current_icon == self.target_icon_id:
                 full_data = {**self.account_data, 'profileIconId': current_icon}
 
-                # 1. Cria o registro inicial
                 await PlayerRepository.upsert_player(
                     discord_id=self.ctx.author.id,
                     riot_data=full_data,
                     lane_main=self.lanes['main'],
                     lane_sec=self.lanes['sec']
                 )
-                
-                # 2. NOVO: Busca e Atualiza o MMR Inicial imediatamente
+
+                # Busca e calcula MMR inicial
                 try:
                     riot_ranks = await self.riot_service.get_rank_by_puuid(self.puuid)
-                    
-                    # Tenta SoloQ
+
                     rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
                     queue_type = 'RANKED_SOLO_5x5'
-                    
-                    # Fallback Flex
+
                     if not rank_data:
                         rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
                         queue_type = 'RANKED_FLEX_SR'
-                    
+
                     if rank_data:
-                        # Calcula MMR
                         initial_mmr = MatchMaker.calculate_adjusted_mmr(
-                            tier=rank_data['tier'], 
-                            rank=rank_data['rank'], 
-                            lp=rank_data['leaguePoints'], 
-                            wins=rank_data['wins'], 
+                            tier=rank_data['tier'],
+                            rank=rank_data['rank'],
+                            lp=rank_data['leaguePoints'],
+                            wins=rank_data['wins'],
                             losses=rank_data['losses'],
                             queue_type=queue_type
                         )
-                        
-                        # Salva no banco
                         await PlayerRepository.update_riot_rank(
                             discord_id=self.ctx.author.id,
                             tier=rank_data['tier'],
@@ -80,19 +73,17 @@ class VerifyView(BaseInteractiveView):
                             queue_type=queue_type
                         )
                     else:
-                        # Se for Unranked, define MMR base 1000
                         await PlayerRepository.update_riot_rank(self.ctx.author.id, "UNRANKED", "", 0, 0, 0, 1000)
-                        
+
                 except Exception as e:
                     print(f"Erro ao calcular MMR inicial no registro: {e}")
-                    # Não falha o registro, apenas o MMR fica padrão até a próxima atualização
 
                 embed = discord.Embed(title="✅ Identidade Confirmada!", color=0x00ff00)
                 embed.description = f"Conta **{self.account_data['gameName']}** vinculada com sucesso."
                 embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{current_icon}.png")
 
                 self.clear_items()
-                await interaction.edit_original_response(embed=embed, view=self) 
+                await interaction.edit_original_response(embed=embed, view=self)
                 self.stop()
             else:
                 await interaction.followup.send(
@@ -111,13 +102,11 @@ class Auth(commands.Cog):
     def remove_invisible(self, text: str):
         if not text:
             return text
-        return "".join(
-            c for c in text
-            if unicodedata.category(c) != "Cf"
-        )
+        return "".join(c for c in text if unicodedata.category(c) != "Cf")
 
     def clean_lane(self, lane_input: str):
-        if not lane_input: return None
+        if not lane_input:
+            return None
         l = lane_input.lower().strip()
         if l in ['top', 'topo']: return 'TOP'
         if l in ['jungle', 'jg', 'selva']: return 'JUNGLE'
@@ -127,13 +116,34 @@ class Auth(commands.Cog):
         if l in ['fill', 'todos']: return 'FILL'
         return None
 
+    def parse_lanes_and_riot_id(self, parts: list):
+        """
+        Extrai lanes e Riot ID dos argumentos da direita para a esquerda.
+        Usuário digita: RiotID MainLane [SecLane]
+        Retorna: (riot_id_str, main_lane, sec_lane)
+        """
+        remaining = list(parts)
+        lane_tokens = []
+
+        # Coleta até 2 tokens de lane, da direita para a esquerda
+        while remaining and len(lane_tokens) < 2:
+            if self.clean_lane(remaining[-1]):
+                lane_tokens.insert(0, remaining.pop())
+            else:
+                break
+
+        riot_id = " ".join(remaining).strip()
+        main_lane = self.clean_lane(lane_tokens[0]) if len(lane_tokens) >= 1 else None
+        sec_lane = self.clean_lane(lane_tokens[1]) if len(lane_tokens) >= 2 else None
+
+        return riot_id, main_lane, sec_lane
+
     @commands.command(name="registrar")
     async def registrar(self, ctx, *, args: str = None):
         """
         Uso: .registrar Nick#TAG MainLane [SecLane]
-        Ex: .registrar Marocos#BR1 Mid Top
+        Ex: .registrar Faker#KR1 Mid Top
         """
-
         if not args:
             embed = discord.Embed(title="❌ Formato Inválido", color=0xff0000)
             embed.description = (
@@ -144,58 +154,25 @@ class Auth(commands.Cog):
             )
             await ctx.reply(embed=embed)
             return
-            
-        # 1. Limpeza Imediata da string completa
-        cleaned_full_args = self.remove_invisible(args).strip()
-        parts = cleaned_full_args.split() 
 
-        # 2. VALIDAÇÃO MÍNIMA: Precisa de Nick#TAG E a Lane (mínimo de 2 partes)
+        cleaned = self.remove_invisible(args).strip()
+        parts = cleaned.split()
+
         if len(parts) < 2:
             await ctx.reply("❌ Você precisa informar pelo menos Nick#TAG e a lane principal.")
             return
 
-        # 3. Restante do Parsing 
+        riot_id, main_lane, sec_lane = self.parse_lanes_and_riot_id(parts)
 
-        main_lane_input = parts[-1]
-        
-        sec_lane_input = None
-        riot_id_parts = parts[:-1]
-
-        if len(riot_id_parts) > 0:
-            # Verifica se a penúltima parte (última de riot_id_parts) é uma lane
-            possible_sec_lane = riot_id_parts[-1]
-            if self.clean_lane(possible_sec_lane):
-                sec_lane_input = possible_sec_lane
-                # Se encontrou Sec Lane, remove ela das partes do Riot ID
-                riot_id_parts = riot_id_parts[:-1]
-        
-        # 4. O que sobrou é o Riot ID (Nome + TAG)
-        riot_id = " ".join(riot_id_parts).strip()
-
-        # 5. Checagem de formato final da TAG
-        if "#" not in riot_id:
+        if not riot_id or "#" not in riot_id:
             await ctx.reply("❌ O Nick deve ter a TAG. Ex: `Nome#BR1`")
             return
 
-        # 6. Limpeza e Finalização do Dicionário
-        m_lane_clean = self.clean_lane(main_lane_input) 
-        s_lane_clean = self.clean_lane(sec_lane_input) if sec_lane_input else None
-
-        if not m_lane_clean:
+        if not main_lane:
             await ctx.reply("❌ Lane principal inválida! Use: Top, Jungle, Mid, Adc ou Sup.")
             return
 
-        # --- CORREÇÃO DA INVERSÃO DE LANES (SWAP) ---
-        if s_lane_clean:
-            final_main = s_lane_clean
-            final_sec = m_lane_clean
-        else:
-            final_main = m_lane_clean
-            final_sec = None
-            
-        lanes_data = {'main': final_main, 'sec': final_sec}
-        # -------------------------------------------
-
+        lanes_data = {'main': main_lane, 'sec': sec_lane}
 
         msg_wait = await ctx.reply("⏳ Buscando conta na Riot...")
 
@@ -220,11 +197,9 @@ class Auth(commands.Cog):
                 title="🛡️ Verificação de Segurança",
                 description=(
                     f"Para confirmar **{riot_id}**, troque seu ícone no LoL para o mesmo da imagem ao lado.\n"
-                    f"Depois clique no botão **Verificar**.\n"
-                    f"\n"
-                    f"Esse ícone aleatório ajuda a garantir que você é o dono da conta.\n"
-                    f"**IMPORTANTE:** Após a verificação, você pode trocar o ícone de volta normalmente.\n"
-                    f"\n\n"
+                    f"Depois clique no botão **Verificar**.\n\n"
+                    f"Esse ícone aleatório garante que você é o dono da conta.\n"
+                    f"**IMPORTANTE:** Após a verificação, pode trocar o ícone de volta.\n\n"
                     f"Este ícone estará no final da sua lista de ícones dentro do lol."
                 ),
                 color=0xffcc00
@@ -242,13 +217,13 @@ class Auth(commands.Cog):
             )
 
             await msg_wait.delete()
-            sent_message = await ctx.reply(embed=embed, view=view) 
-            view.message = sent_message 
-            
+            sent_message = await ctx.reply(embed=embed, view=view)
+            view.message = sent_message
 
         except Exception as e:
             print(f"Erro .registrar: {e}")
             await ctx.reply("💥 Erro interno ao conectar com a Riot.")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Auth(bot))

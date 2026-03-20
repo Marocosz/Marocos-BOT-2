@@ -1,51 +1,63 @@
 import sqlite3
 
-# Nome do arquivo do banco
 DB_FILE = "data/database.sqlite"
 
+def add_column(cursor, table, column, col_type, default=None):
+    """Tenta adicionar uma coluna. Ignora silenciosamente se já existir."""
+    try:
+        default_clause = f" DEFAULT {default}" if default is not None else ""
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}{default_clause}")
+        print(f"  [+] {table}.{column} adicionada.")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            print(f"  [OK] {table}.{column} já existe.")
+        else:
+            print(f"  [ERRO] {table}.{column}: {e}")
+
 def migrate():
-    print(f"🔧 Iniciando atualização do banco de dados: {DB_FILE}...")
-    
+    print(f"[*] Atualizando banco: {DB_FILE}...")
+
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        
-        # 1. Adicionar coluna de Rastreamento na tabela de Configuração
-        try:
-            print("> Tentando adicionar 'tracking_channel_id' em 'guild_configs'...")
-            cursor.execute("ALTER TABLE guild_configs ADD COLUMN tracking_channel_id BIGINT")
-            print("  ✅ Sucesso!")
-        except sqlite3.OperationalError as e:
-            if "duplicate column name" in str(e):
-                print("  ⚠️ Coluna já existe (ignorando).")
-            else:
-                print(f"  ❌ Erro (Tabela talvez não exista ainda): {e}")
 
-        # 2. (Prevenção) Adicionar colunas de Rank caso você não tenha resetado no passo anterior
-        colunas_player = [
-            ("solo_tier", "VARCHAR"),
-            ("solo_rank", "VARCHAR"),
-            ("solo_lp", "INTEGER"),
-            ("last_rank_update", "DATETIME")
-        ]
+        # --- Migrações originais ---
+        add_column(cursor, "guild_configs", "tracking_channel_id", "BIGINT")
 
-        for col, tipo in colunas_player:
-            try:
-                print(f"> Tentando adicionar '{col}' em 'players'...")
-                cursor.execute(f"ALTER TABLE players ADD COLUMN {col} {tipo}")
-                print("  ✅ Sucesso!")
-            except sqlite3.OperationalError as e:
-                if "duplicate column name" in str(e):
-                    print("  ⚠️ Coluna já existe (ignorando).")
-                else:
-                    print(f"  ❌ Erro: {e}")
+        for col, tipo in [("solo_tier", "VARCHAR"), ("solo_rank", "VARCHAR"),
+                          ("solo_lp", "INTEGER"), ("last_rank_update", "DATETIME")]:
+            add_column(cursor, "players", col, tipo)
+
+        # --- Novas colunas (v2) ---
+
+        # Streaks de vitórias
+        add_column(cursor, "players", "current_win_streak", "INTEGER", default=0)
+        add_column(cursor, "players", "best_win_streak", "INTEGER", default=0)
+
+        # Snapshot de MMR no momento da partida
+        add_column(cursor, "match_players", "mmr_before", "INTEGER")
+
+        # Contadores de MVP/iMVP
+        add_column(cursor, "players", "mvp_count", "INTEGER", default=0)
+        add_column(cursor, "players", "imvp_count", "INTEGER", default=0)
+
+        # Nova tabela: estado da fila persistida
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS lobby_states (
+                guild_id INTEGER PRIMARY KEY,
+                queue_json TEXT DEFAULT '[]',
+                channel_id INTEGER,
+                updated_at DATETIME
+            )
+        """)
+        print("  [+] Tabela lobby_states verificada/criada.")
 
         conn.commit()
         conn.close()
-        print("\n✨ Banco de dados atualizado com sucesso! Seus dados foram mantidos.")
-        
+        print("\n[OK] Banco atualizado com sucesso! Dados anteriores preservados.")
+
     except Exception as e:
-        print(f"\n💥 Erro crítico ao abrir o banco: {e}")
+        print(f"\n💥 Erro crítico: {e}")
 
 if __name__ == "__main__":
     migrate()
