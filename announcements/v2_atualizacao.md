@@ -60,3 +60,13 @@ Ao finalizar uma partida, o bot remove os cargos antigos dos 10 jogadores e reat
 ## Help Atualizado
 
 O painel de ajuda (`.ajuda`) foi completamente reescrito com 7 seções cobrindo todos os comandos, incluindo o novo sistema de Agenda e todas as funcionalidades adicionadas nesta atualização.
+
+## Verificação de Registro Automática
+
+O processo de vinculação de conta Riot foi melhorado.
+
+**Antes:** era necessário clicar no botão "Já troquei!" repetidamente e torcer para a API da Riot ter atualizado.
+
+**Agora:** após trocar o ícone no LoL, o bot verifica automaticamente a cada **1 minuto** por até **10 minutos**. Assim que a API da Riot atualizar (o que pode levar alguns minutos), o registro é concluído sozinho — sem precisar clicar em nada.
+
+O botão "Já troquei! Verificar agora" ainda existe para quem quiser tentar antecipadamente.

@@ -81,9 +81,11 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(
                 name="📝 `.registrar <Nick#TAG> <Lane> [Lane2]`",
                 value=(
-                    "Vincula sua conta Riot com verificação de ícone.\n"
+                    "Vincula sua conta Riot com verificação automática de ícone.\n"
                     "**Ex:** `.registrar Faker#KR1 Mid` — só main lane\n"
-                    "**Ex:** `.registrar Faker#KR1 Mid Top` — main + secondary"
+                    "**Ex:** `.registrar Faker#KR1 Mid Top` — main + secondary\n\n"
+                    "Após rodar o comando, troque seu ícone no LoL para o mostrado.\n"
+                    "O bot detecta a troca automaticamente em até **10 minutos** — sem precisar clicar."
                 ),
                 inline=False,
             )
