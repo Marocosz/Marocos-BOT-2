@@ -642,7 +642,9 @@ class Ranking(commands.Cog):
                 f"```"
                 f"{leader}"
             )
-
+            
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            
             embed.add_field(
                 name=f"⚔️ Como Adversários ({data['as_opponents']} jogo(s))",
                 value=vs_block,
@@ -679,6 +681,8 @@ class Ranking(commands.Cog):
                 ts = f"<t:{int(m['finished_at'].timestamp())}:R>" if m.get('finished_at') else ""
                 lines.append(f"`#{m['match_id']}` {tag} {result} {ts}")
 
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
+            
             embed.add_field(
                 name="📋 Últimas Partidas em Comum",
                 value="\n".join(lines),

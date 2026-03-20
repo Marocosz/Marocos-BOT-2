@@ -594,7 +594,7 @@ class EventRepository:
             result = await session.execute(
                 select(ScheduledEvent)
                 .where(ScheduledEvent.guild_id == guild_id)
-                .where(ScheduledEvent.status == EventStatus.OPEN)
+                .where(ScheduledEvent.status.in_([EventStatus.OPEN, EventStatus.STARTED]))
                 .order_by(ScheduledEvent.scheduled_for)
                 .options(selectinload(ScheduledEvent.players))
             )

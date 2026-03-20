@@ -42,6 +42,8 @@ def build_embed(event: dict, guild: discord.Guild) -> discord.Embed:
         display = member.display_name if member else f"Usuário ({pid})"
         names.append(f"`{i+1}.` {display}")
 
+    embed.add_field(name="\u200b", value="\u200b", inline=False)
+    
     total   = len(player_ids)
     max_p   = event['max_players']
     spots   = max_p - total
@@ -49,6 +51,8 @@ def build_embed(event: dict, guild: discord.Guild) -> discord.Embed:
     value   = "\n".join(names) if names else "_Ninguém confirmado ainda._"
     embed.add_field(name=header, value=value, inline=False)
 
+    embed.add_field(name="\u200b", value="\u200b", inline=False)
+    
     if event['status'] == 'open':
         if spots > 0:
             embed.add_field(name="\n🆓 Vagas restantes", value=f"**{spots}**", inline=True)
@@ -312,24 +316,29 @@ class Agenda(commands.Cog):
         if not events:
             return await ctx.reply("📭 Nenhum evento agendado no momento.")
 
+        status_icon = {'open': '📅', 'started': '🚀'}
+        status_label = {'open': 'Aberto', 'started': 'Iniciado'}
+
         embed = discord.Embed(
-            title="📅 Próximos Eventos",
+            title="📅 Agenda de Eventos",
             color=0x3498db
         )
-        embed.description = f"**{len(events)}** evento(s) aberto(s)\n"
+        embed.description = f"**{len(events)}** evento(s) ativo(s)\n"
 
         embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         for e in events[:10]:
             ts    = int(e['scheduled_for'].replace(tzinfo=timezone.utc).timestamp())
             total = len(e['player_ids'])
-            vagas = e['max_players'] - total
+            icon  = status_icon.get(e['status'], '📅')
+            label = status_label.get(e['status'], e['status'])
+            vagas_str = f"· `{e['max_players'] - total}` vagas" if e['status'] == 'open' else "· **Inscrições encerradas**"
             embed.add_field(
-                name=f"#{e['id']} — {e['title']}",
+                name=f"{icon} #{e['id']} — {e['title']} `{label}`",
                 value=(
                     f"🗓️ <t:{ts}:F>\n"
                     f"⏰ <t:{ts}:R>\n"
-                    f"👥 `{total}/{e['max_players']}` confirmados · `{vagas}` vagas"
+                    f"👥 `{total}/{e['max_players']}` confirmados {vagas_str}"
                 ),
                 inline=False,
             )
