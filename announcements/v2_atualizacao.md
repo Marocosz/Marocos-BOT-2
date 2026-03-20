@@ -32,3 +32,19 @@ Ao subir de nível no sistema de comunidade, o bot envia um embed de parabéns n
 **`.registrar`** — a ordem das lanes agora é intuitiva: `.registrar Nick#TAG Mid Top` define **Mid** como principal e **Top** como secundária (antes a lógica era invertida)
 
 **Votação MVP/iMVP** — corrigido bug onde a própria reação do bot era contada como voto, inflando o resultado
+
+## Sistema de Agenda
+
+Novo sistema para agendar eventos com antecedência.
+
+**`.agendar DD/MM/YYYY HH:MM Título`** *(admin)* — cria um evento com botões de confirmação no canal. O embed é atualizado em tempo real à medida que os jogadores confirmam presença.
+
+**`.agenda`** — lista todos os eventos abertos com data, confirmados e vagas.
+
+**Controles do admin:** `.cancelar_agenda`, `.add_agenda @user`, `.kick_agenda @user`, `.iniciar_agenda`
+
+**Lembretes automáticos por DM:** o bot avisa cada confirmado **24 horas** e **30 minutos** antes do evento começar.
+
+## Help Atualizado
+
+O painel de ajuda (`.ajuda`) foi completamente reescrito com 7 seções cobrindo todos os comandos, incluindo o novo sistema de Agenda e todas as funcionalidades adicionadas nesta atualização.

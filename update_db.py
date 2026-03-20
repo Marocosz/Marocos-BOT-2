@@ -52,6 +52,36 @@ def migrate():
         """)
         print("  [+] Tabela lobby_states verificada/criada.")
 
+        # Tabelas de agenda (v4)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS scheduled_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER,
+                message_id INTEGER,
+                created_by INTEGER NOT NULL,
+                title VARCHAR NOT NULL,
+                description VARCHAR,
+                scheduled_for DATETIME NOT NULL,
+                max_players INTEGER DEFAULT 10,
+                status VARCHAR DEFAULT 'open',
+                notified_24h BOOLEAN DEFAULT 0,
+                notified_30min BOOLEAN DEFAULT 0,
+                created_at DATETIME
+            )
+        """)
+        print("  [+] Tabela scheduled_events verificada/criada.")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS scheduled_event_players (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER REFERENCES scheduled_events(id),
+                player_id INTEGER NOT NULL,
+                confirmed_at DATETIME
+            )
+        """)
+        print("  [+] Tabela scheduled_event_players verificada/criada.")
+
         conn.commit()
         conn.close()
         print("\n[OK] Banco atualizado com sucesso! Dados anteriores preservados.")

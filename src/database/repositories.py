@@ -1,7 +1,8 @@
 import json
 from sqlalchemy import select, desc
 from sqlalchemy.orm import aliased
-from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide, GuildConfig, CommunityProfile, LobbyState
+from src.database.models import Player, Match, MatchPlayer, MatchStatus, TeamSide, GuildConfig, CommunityProfile, LobbyState, ScheduledEvent, ScheduledEventPlayer, EventStatus
+from sqlalchemy.orm import selectinload
 from src.database.config import get_session
 from datetime import datetime
 
@@ -522,3 +523,154 @@ class CommunityRepository:
                 .limit(limit)
             )
             return result.scalars().all()
+
+
+# --- REPOSITÓRIO DE EVENTOS AGENDADOS ---
+class EventRepository:
+
+    @staticmethod
+    async def create_event(guild_id: int, created_by: int, title: str, scheduled_for, max_players: int = 10, description: str = None) -> int:
+        async with get_session() as session:
+            event = ScheduledEvent(
+                guild_id=guild_id,
+                created_by=created_by,
+                title=title,
+                scheduled_for=scheduled_for,
+                max_players=max_players,
+                description=description,
+            )
+            session.add(event)
+            await session.flush()
+            return event.id
+
+    @staticmethod
+    async def get_event(event_id: int) -> dict | None:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ScheduledEvent)
+                .where(ScheduledEvent.id == event_id)
+                .options(selectinload(ScheduledEvent.players))
+            )
+            e = result.scalar_one_or_none()
+            if not e:
+                return None
+            return {
+                'id': e.id, 'guild_id': e.guild_id, 'channel_id': e.channel_id,
+                'message_id': e.message_id, 'created_by': e.created_by,
+                'title': e.title, 'description': e.description,
+                'scheduled_for': e.scheduled_for, 'max_players': e.max_players,
+                'status': e.status.value, 'notified_24h': e.notified_24h,
+                'notified_30min': e.notified_30min,
+                'player_ids': [p.player_id for p in e.players],
+            }
+
+    @staticmethod
+    async def get_open_events(guild_id: int) -> list:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ScheduledEvent)
+                .where(ScheduledEvent.guild_id == guild_id)
+                .where(ScheduledEvent.status == EventStatus.OPEN)
+                .order_by(ScheduledEvent.scheduled_for)
+                .options(selectinload(ScheduledEvent.players))
+            )
+            events = result.scalars().all()
+            return [
+                {
+                    'id': e.id, 'guild_id': e.guild_id, 'channel_id': e.channel_id,
+                    'message_id': e.message_id, 'title': e.title, 'description': e.description,
+                    'scheduled_for': e.scheduled_for, 'max_players': e.max_players,
+                    'status': e.status.value, 'notified_24h': e.notified_24h,
+                    'notified_30min': e.notified_30min,
+                    'player_ids': [p.player_id for p in e.players],
+                }
+                for e in events
+            ]
+
+    @staticmethod
+    async def set_message(event_id: int, channel_id: int, message_id: int):
+        async with get_session() as session:
+            result = await session.execute(select(ScheduledEvent).where(ScheduledEvent.id == event_id))
+            e = result.scalar_one_or_none()
+            if e:
+                e.channel_id = channel_id
+                e.message_id = message_id
+
+    @staticmethod
+    async def add_player(event_id: int, player_id: int) -> bool:
+        """Retorna True se adicionado, False se já estava."""
+        async with get_session() as session:
+            existing = await session.execute(
+                select(ScheduledEventPlayer)
+                .where(ScheduledEventPlayer.event_id == event_id)
+                .where(ScheduledEventPlayer.player_id == player_id)
+            )
+            if existing.scalar_one_or_none():
+                return False
+            session.add(ScheduledEventPlayer(event_id=event_id, player_id=player_id))
+            return True
+
+    @staticmethod
+    async def remove_player(event_id: int, player_id: int) -> bool:
+        """Retorna True se removido."""
+        async with get_session() as session:
+            result = await session.execute(
+                select(ScheduledEventPlayer)
+                .where(ScheduledEventPlayer.event_id == event_id)
+                .where(ScheduledEventPlayer.player_id == player_id)
+            )
+            ep = result.scalar_one_or_none()
+            if ep:
+                await session.delete(ep)
+                return True
+            return False
+
+    @staticmethod
+    async def cancel_event(event_id: int) -> bool:
+        async with get_session() as session:
+            result = await session.execute(select(ScheduledEvent).where(ScheduledEvent.id == event_id))
+            e = result.scalar_one_or_none()
+            if e:
+                e.status = EventStatus.CANCELLED
+                return True
+            return False
+
+    @staticmethod
+    async def start_event(event_id: int) -> bool:
+        async with get_session() as session:
+            result = await session.execute(select(ScheduledEvent).where(ScheduledEvent.id == event_id))
+            e = result.scalar_one_or_none()
+            if e:
+                e.status = EventStatus.STARTED
+                return True
+            return False
+
+    @staticmethod
+    async def get_events_needing_notification() -> list:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ScheduledEvent)
+                .where(ScheduledEvent.status == EventStatus.OPEN)
+                .options(selectinload(ScheduledEvent.players))
+            )
+            events = result.scalars().all()
+            return [
+                {
+                    'id': e.id, 'guild_id': e.guild_id, 'channel_id': e.channel_id,
+                    'title': e.title, 'scheduled_for': e.scheduled_for,
+                    'notified_24h': e.notified_24h, 'notified_30min': e.notified_30min,
+                    'player_ids': [p.player_id for p in e.players],
+                }
+                for e in events
+            ]
+
+    @staticmethod
+    async def mark_notified(event_id: int, notification_type: str):
+        async with get_session() as session:
+            result = await session.execute(select(ScheduledEvent).where(ScheduledEvent.id == event_id))
+            e = result.scalar_one_or_none()
+            if e:
+                if notification_type == '24h':
+                    e.notified_24h = True
+                elif notification_type == '30min':
+                    e.notified_30min = True

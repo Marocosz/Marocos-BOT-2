@@ -139,3 +139,42 @@ class LobbyState(Base):
     queue_json = Column(String, default="[]")   # Fila serializada em JSON
     channel_id = Column(BigInteger, nullable=True)  # Canal onde a fila foi aberta
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EventStatus(enum.Enum):
+    OPEN = "open"
+    CANCELLED = "cancelled"
+    STARTED = "started"
+
+
+class ScheduledEvent(Base):
+    """Evento agendado (agenda de partidas)"""
+    __tablename__ = "scheduled_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    guild_id = Column(BigInteger, nullable=False)
+    channel_id = Column(BigInteger, nullable=True)
+    message_id = Column(BigInteger, nullable=True)
+    created_by = Column(BigInteger, nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    scheduled_for = Column(DateTime, nullable=False)
+    max_players = Column(Integer, default=10)
+    status = Column(SAEnum(EventStatus), default=EventStatus.OPEN)
+    notified_24h = Column(Boolean, default=False)
+    notified_30min = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    players = relationship("ScheduledEventPlayer", back_populates="event", cascade="all, delete-orphan")
+
+
+class ScheduledEventPlayer(Base):
+    """Jogador confirmado em um evento agendado"""
+    __tablename__ = "scheduled_event_players"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(Integer, ForeignKey("scheduled_events.id"))
+    player_id = Column(BigInteger, nullable=False)
+    confirmed_at = Column(DateTime, default=datetime.utcnow)
+
+    event = relationship("ScheduledEvent", back_populates="players")
