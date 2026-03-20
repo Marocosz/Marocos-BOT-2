@@ -1,7 +1,8 @@
 import discord
 import random
 import asyncio
-from discord.ext import commands
+from datetime import datetime, timedelta
+from discord.ext import commands, tasks
 import unicodedata
 from src.utils.views import BaseInteractiveView
 
@@ -9,19 +10,77 @@ from src.services.riot_api import RiotAPI
 from src.services.matchmaker import MatchMaker
 from src.database.repositories import PlayerRepository
 
+import logging
+logger = logging.getLogger("auth")
+
+# Timeout da verificação em background: 10 minutos
+VERIFY_TIMEOUT_MINUTES = 10
+
+
+async def _complete_registration(discord_id, puuid, account_data, lanes, current_icon, riot_service, message):
+    """Finaliza o registro: salva no banco, calcula MMR, edita o embed."""
+    full_data = {**account_data, 'profileIconId': current_icon}
+
+    await PlayerRepository.upsert_player(
+        discord_id=discord_id,
+        riot_data=full_data,
+        lane_main=lanes['main'],
+        lane_sec=lanes['sec']
+    )
+
+    try:
+        riot_ranks = await riot_service.get_rank_by_puuid(puuid)
+        rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
+        queue_type = 'RANKED_SOLO_5x5'
+        if not rank_data:
+            rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
+            queue_type = 'RANKED_FLEX_SR'
+
+        if rank_data:
+            initial_mmr = MatchMaker.calculate_adjusted_mmr(
+                tier=rank_data['tier'],
+                rank=rank_data['rank'],
+                lp=rank_data['leaguePoints'],
+                wins=rank_data['wins'],
+                losses=rank_data['losses'],
+                queue_type=queue_type
+            )
+            await PlayerRepository.update_riot_rank(
+                discord_id=discord_id,
+                tier=rank_data['tier'],
+                rank=rank_data['rank'],
+                lp=rank_data['leaguePoints'],
+                wins=rank_data['wins'],
+                losses=rank_data['losses'],
+                calculated_mmr=initial_mmr,
+                queue_type=queue_type
+            )
+        else:
+            await PlayerRepository.update_riot_rank(discord_id, "UNRANKED", "", 0, 0, 0, 1000)
+    except Exception as e:
+        logger.error(f"Erro ao calcular MMR inicial: {e}")
+
+    embed = discord.Embed(title="✅ Identidade Confirmada!", color=0x00ff00)
+    embed.description = f"Conta **{account_data['gameName']}** vinculada com sucesso."
+    embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/{riot_service.ddragon_version}/img/profileicon/{current_icon}.png")
+
+    try:
+        await message.edit(embed=embed, view=None)
+    except Exception:
+        pass
+
 
 class VerifyView(BaseInteractiveView):
-    def __init__(self, bot, ctx, riot_service, puuid, target_icon_id, account_data, lanes):
-        super().__init__(timeout=180)
-        self.bot = bot
+    def __init__(self, auth_cog, ctx, puuid, target_icon_id, account_data, lanes):
+        super().__init__(timeout=VERIFY_TIMEOUT_MINUTES * 60)
+        self.auth_cog = auth_cog
         self.ctx = ctx
-        self.riot_service = riot_service
         self.puuid = puuid
         self.target_icon_id = target_icon_id
         self.account_data = account_data
         self.lanes = lanes
 
-    @discord.ui.button(label="Já troquei! Verificar", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="Já troquei! Verificar agora", style=discord.ButtonStyle.green)
     async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.ctx.author.id:
             await interaction.response.send_message("Ei, saia daqui! Use .registrar para fazer o seu.", ephemeral=True)
@@ -30,100 +89,89 @@ class VerifyView(BaseInteractiveView):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            # Tenta até 3 vezes com 3s de intervalo (API da Riot tem cache de ícone)
-            current_icon = None
-            summoner_data = None
-            for attempt in range(3):
-                summoner_data = await self.riot_service.get_summoner_by_puuid(self.puuid)
-                if not summoner_data:
-                    break
-                current_icon = summoner_data.get('profileIconId')
-                print(f"[Verificação] Tentativa {attempt + 1}/3 — ícone atual: {current_icon} | esperado: {self.target_icon_id}")
-                if current_icon == self.target_icon_id:
-                    break
-                if attempt < 2:
-                    await asyncio.sleep(3)
-
+            summoner_data = await self.auth_cog.riot_service.get_summoner_by_puuid(self.puuid)
             if not summoner_data:
-                await interaction.followup.send(
-                    "⚠️ Não foi possível conectar com a Riot API agora. Tente novamente em instantes.",
-                    ephemeral=True
-                )
+                await interaction.followup.send("⚠️ Não foi possível conectar com a Riot API. Aguarde, a verificação automática tentará em breve.", ephemeral=True)
                 return
 
+            current_icon = summoner_data.get('profileIconId')
+            logger.info(f"[Verificação manual] ícone atual: {current_icon} | esperado: {self.target_icon_id}")
+
             if current_icon == self.target_icon_id:
-                full_data = {**self.account_data, 'profileIconId': current_icon}
-
-                await PlayerRepository.upsert_player(
-                    discord_id=self.ctx.author.id,
-                    riot_data=full_data,
-                    lane_main=self.lanes['main'],
-                    lane_sec=self.lanes['sec']
-                )
-
-                # Busca e calcula MMR inicial
-                try:
-                    riot_ranks = await self.riot_service.get_rank_by_puuid(self.puuid)
-
-                    rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_SOLO_5x5'), None)
-                    queue_type = 'RANKED_SOLO_5x5'
-
-                    if not rank_data:
-                        rank_data = next((r for r in (riot_ranks or []) if r['queueType'] == 'RANKED_FLEX_SR'), None)
-                        queue_type = 'RANKED_FLEX_SR'
-
-                    if rank_data:
-                        initial_mmr = MatchMaker.calculate_adjusted_mmr(
-                            tier=rank_data['tier'],
-                            rank=rank_data['rank'],
-                            lp=rank_data['leaguePoints'],
-                            wins=rank_data['wins'],
-                            losses=rank_data['losses'],
-                            queue_type=queue_type
-                        )
-                        await PlayerRepository.update_riot_rank(
-                            discord_id=self.ctx.author.id,
-                            tier=rank_data['tier'],
-                            rank=rank_data['rank'],
-                            lp=rank_data['leaguePoints'],
-                            wins=rank_data['wins'],
-                            losses=rank_data['losses'],
-                            calculated_mmr=initial_mmr,
-                            queue_type=queue_type
-                        )
-                    else:
-                        await PlayerRepository.update_riot_rank(self.ctx.author.id, "UNRANKED", "", 0, 0, 0, 1000)
-
-                except Exception as e:
-                    print(f"Erro ao calcular MMR inicial no registro: {e}")
-
-                embed = discord.Embed(title="✅ Identidade Confirmada!", color=0x00ff00)
-                embed.description = f"Conta **{self.account_data['gameName']}** vinculada com sucesso."
-                embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/{self.riot_service.ddragon_version}/img/profileicon/{current_icon}.png")
-
-                self.clear_items()
-                await self.message.edit(embed=embed, view=self)
-                await interaction.followup.send("✅ Conta verificada com sucesso!", ephemeral=True)
+                self.auth_cog.pending_verifications.pop(self.ctx.author.id, None)
                 self.stop()
+                await _complete_registration(
+                    self.ctx.author.id, self.puuid, self.account_data,
+                    self.lanes, current_icon, self.auth_cog.riot_service, self.message
+                )
             else:
                 await interaction.followup.send(
-                    f"❌ Ícone incorreto após 3 tentativas!\n"
+                    f"⏳ Ícone ainda não atualizado na API da Riot.\n"
                     f"Atual: **{current_icon}** | Necessário: **{self.target_icon_id}**\n\n"
-                    f"⏳ A Riot pode demorar **até 5 minutos** para atualizar. Aguarde e tente novamente.",
+                    f"A verificação automática está rodando em background e vai confirmar assim que a API atualizar (pode levar até {VERIFY_TIMEOUT_MINUTES} minutos).",
                     ephemeral=True
                 )
         except Exception as e:
-            print(f"Erro verify: {e}")
-            await interaction.followup.send(
-                "💥 Erro interno ao verificar. Tente novamente em alguns instantes.",
-                ephemeral=True
+            logger.error(f"Erro verify manual: {e}")
+            await interaction.followup.send("💥 Erro interno ao verificar. A verificação automática continua rodando.", ephemeral=True)
+
+    async def on_timeout(self):
+        self.auth_cog.pending_verifications.pop(self.ctx.author.id, None)
+        try:
+            embed = discord.Embed(
+                title="⏰ Verificação Expirada",
+                description="O tempo de verificação expirou. Use `.registrar` novamente para tentar.",
+                color=0xff0000
             )
+            await self.message.edit(embed=embed, view=None)
+        except Exception:
+            pass
 
 
 class Auth(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.riot_service = RiotAPI()
+        # {discord_id: {puuid, target_icon_id, account_data, lanes, message, expires_at}}
+        self.pending_verifications: dict = {}
+
+    async def cog_load(self):
+        self.background_verify.start()
+
+    async def cog_unload(self):
+        self.background_verify.cancel()
+
+    @tasks.loop(seconds=60)
+    async def background_verify(self):
+        if not self.pending_verifications:
+            return
+
+        now = datetime.utcnow()
+        expired = [uid for uid, v in self.pending_verifications.items() if now >= v['expires_at']]
+        for uid in expired:
+            self.pending_verifications.pop(uid, None)
+
+        for discord_id, v in list(self.pending_verifications.items()):
+            try:
+                summoner_data = await self.riot_service.get_summoner_by_puuid(v['puuid'])
+                if not summoner_data:
+                    continue
+
+                current_icon = summoner_data.get('profileIconId')
+                logger.info(f"[Verificação BG] user={discord_id} ícone atual: {current_icon} | esperado: {v['target_icon_id']}")
+
+                if current_icon == v['target_icon_id']:
+                    self.pending_verifications.pop(discord_id, None)
+                    await _complete_registration(
+                        discord_id, v['puuid'], v['account_data'],
+                        v['lanes'], current_icon, self.riot_service, v['message']
+                    )
+            except Exception as e:
+                logger.error(f"Erro na verificação background de {discord_id}: {e}")
+
+    @background_verify.before_loop
+    async def before_verify(self):
+        await self.bot.wait_until_ready()
 
     def remove_invisible(self, text: str):
         if not text:
@@ -143,25 +191,16 @@ class Auth(commands.Cog):
         return None
 
     def parse_lanes_and_riot_id(self, parts: list):
-        """
-        Extrai lanes e Riot ID dos argumentos da direita para a esquerda.
-        Usuário digita: RiotID MainLane [SecLane]
-        Retorna: (riot_id_str, main_lane, sec_lane)
-        """
         remaining = list(parts)
         lane_tokens = []
-
-        # Coleta até 2 tokens de lane, da direita para a esquerda
         while remaining and len(lane_tokens) < 2:
             if self.clean_lane(remaining[-1]):
                 lane_tokens.insert(0, remaining.pop())
             else:
                 break
-
         riot_id = " ".join(remaining).strip()
         main_lane = self.clean_lane(lane_tokens[0]) if len(lane_tokens) >= 1 else None
         sec_lane = self.clean_lane(lane_tokens[1]) if len(lane_tokens) >= 2 else None
-
         return riot_id, main_lane, sec_lane
 
     @commands.command(name="registrar")
@@ -199,7 +238,6 @@ class Auth(commands.Cog):
             return
 
         lanes_data = {'main': main_lane, 'sec': sec_lane}
-
         msg_wait = await ctx.reply("⏳ Buscando conta na Riot...")
 
         try:
@@ -214,10 +252,10 @@ class Auth(commands.Cog):
             if not summoner_data:
                 await msg_wait.edit(content="❌ Não foi possível buscar os dados do summoner na Riot. Tente novamente.")
                 return
+
             current_icon_id = summoner_data['profileIconId']
 
-            # Ícones básicos garantidamente existentes no LoL
-            BASE_ICONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+            BASE_ICONS = list(range(30))
             target_icon_id = current_icon_id
             while target_icon_id == current_icon_id:
                 target_icon_id = random.choice(BASE_ICONS)
@@ -230,19 +268,18 @@ class Auth(commands.Cog):
                 title="🛡️ Verificação de Segurança",
                 description=(
                     f"Para confirmar **{riot_id}**, troque seu ícone no LoL para o mesmo da imagem ao lado.\n"
-                    f"Depois clique no botão **Verificar**.\n\n"
-                    f"Esse ícone aleatório garante que você é o dono da conta.\n"
-                    f"**IMPORTANTE:** Após a verificação, pode trocar o ícone de volta.\n\n"
-                    f"Este ícone estará no final da sua lista de ícones dentro do lol."
+                    f"Depois clique no botão ou aguarde — **a verificação é automática**.\n\n"
+                    f"O bot detecta a troca automaticamente a cada **1 minuto** por até **{VERIFY_TIMEOUT_MINUTES} minutos**.\n\n"
+                    f"**IMPORTANTE:** Após a verificação, pode trocar o ícone de volta.\n"
+                    f"Este ícone estará no final da sua lista de ícones dentro do LoL."
                 ),
                 color=0xffcc00
             )
             embed.set_thumbnail(url=icon_url)
 
             view = VerifyView(
-                bot=self.bot,
+                auth_cog=self,
                 ctx=ctx,
-                riot_service=self.riot_service,
                 puuid=account_data['puuid'],
                 target_icon_id=target_icon_id,
                 account_data=account_data,
@@ -253,8 +290,18 @@ class Auth(commands.Cog):
             sent_message = await ctx.reply(embed=embed, view=view)
             view.message = sent_message
 
+            # Registra verificação pendente para o background task
+            self.pending_verifications[ctx.author.id] = {
+                'puuid': account_data['puuid'],
+                'target_icon_id': target_icon_id,
+                'account_data': account_data,
+                'lanes': lanes_data,
+                'message': sent_message,
+                'expires_at': datetime.utcnow() + timedelta(minutes=VERIFY_TIMEOUT_MINUTES),
+            }
+
         except Exception as e:
-            print(f"Erro .registrar: {e}")
+            logger.error(f"Erro .registrar: {e}")
             try:
                 await msg_wait.delete()
             except Exception:
