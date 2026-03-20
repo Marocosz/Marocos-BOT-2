@@ -674,7 +674,7 @@ class EventRepository:
         async with get_session() as session:
             result = await session.execute(
                 select(ScheduledEvent)
-                .where(ScheduledEvent.status == EventStatus.OPEN)
+                .where(ScheduledEvent.status == EventStatus.STARTED)
                 .options(selectinload(ScheduledEvent.players))
             )
             events = result.scalars().all()

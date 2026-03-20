@@ -173,7 +173,7 @@ class Agenda(commands.Cog):
                     await EventRepository.mark_notified(event['id'], '24h')
 
                 elif (not event['notified_30min']
-                        and timedelta(minutes=19) <= diff <= timedelta(minutes=36)):
+                        and timedelta(minutes=10) <= diff <= timedelta(minutes=45)):
                     await self._send_reminder(event, '30min')
                     await EventRepository.mark_notified(event['id'], '30min')
 
