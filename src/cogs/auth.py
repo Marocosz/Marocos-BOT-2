@@ -26,10 +26,18 @@ class VerifyView(BaseInteractiveView):
             await interaction.response.send_message("Ei, saia daqui! Use .registrar para fazer o seu.", ephemeral=True)
             return
 
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
 
         try:
             summoner_data = await self.riot_service.get_summoner_by_puuid(self.puuid)
+
+            if not summoner_data:
+                await interaction.followup.send(
+                    "⚠️ Não foi possível conectar com a Riot API agora. Tente novamente em instantes.",
+                    ephemeral=True
+                )
+                return
+
             current_icon = summoner_data.get('profileIconId')
 
             if current_icon == self.target_icon_id:
@@ -87,11 +95,17 @@ class VerifyView(BaseInteractiveView):
                 self.stop()
             else:
                 await interaction.followup.send(
-                    f"❌ Ícone incorreto! Atual: **{current_icon}** | Necessário: **{self.target_icon_id}**.",
+                    f"❌ Ícone incorreto!\n"
+                    f"Atual: **{current_icon}** | Necessário: **{self.target_icon_id}**\n\n"
+                    f"⏳ A Riot pode demorar **1-2 minutos** para atualizar após a troca. Aguarde e tente novamente.",
                     ephemeral=True
                 )
         except Exception as e:
             print(f"Erro verify: {e}")
+            await interaction.followup.send(
+                "💥 Erro interno ao verificar. Tente novamente em alguns instantes.",
+                ephemeral=True
+            )
 
 
 class Auth(commands.Cog):
@@ -187,9 +201,11 @@ class Auth(commands.Cog):
             summoner_data = await self.riot_service.get_summoner_by_puuid(account_data['puuid'])
             current_icon_id = summoner_data['profileIconId']
 
+            # Ícones básicos garantidamente existentes no LoL
+            BASE_ICONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
             target_icon_id = current_icon_id
             while target_icon_id == current_icon_id:
-                target_icon_id = random.randint(0, 28)
+                target_icon_id = random.choice(BASE_ICONS)
 
             icon_url = f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{target_icon_id}.png"
 
