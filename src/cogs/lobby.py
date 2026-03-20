@@ -820,13 +820,17 @@ class Lobby(commands.Cog):
 
         if announcements:
             for name, streak, is_win in announcements:
-                embed = discord.Embed(
-                    title="🔥 SEQUÊNCIA DE VITÓRIAS!",
-                    description=f"**{name}** está em chamas com **{streak} vitória(s) seguidas** na Liga!",
-                    color=0xff4500
-                )
                 if streak >= 10:
-                    embed.description = f"👑 **{name}** está DOMINANTE com **{streak} vitórias seguidas** na Liga! Alguém para esse monstro?"
+                    title = "👑 DOMINÂNCIA ABSOLUTA!"
+                    desc = f"**{name}** está imparável com **{streak} vitórias seguidas**!\nAlguém para esse monstro?"
+                    color = 0xffd700
+                else:
+                    title = "🔥 SEQUÊNCIA DE VITÓRIAS!"
+                    desc = f"**{name}** está em chamas na Liga!\n**{streak} vitórias seguidas** e contando..."
+                    color = 0xff4500
+
+                embed = discord.Embed(title=title, description=desc, color=color)
+                embed.set_footer(text=f"Use .perfil para ver o histórico de conquistas")
                 await channel.send(embed=embed)
 
     # --- COMANDOS ---

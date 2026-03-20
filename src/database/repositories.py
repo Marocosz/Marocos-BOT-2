@@ -254,8 +254,8 @@ class MatchRepository:
             }
 
     @staticmethod
-    async def get_player_internal_history(discord_id: int, limit: int = 10):
-        """Retorna o histórico de partidas internas de um jogador."""
+    async def get_player_internal_history(discord_id: int):
+        """Retorna todo o histórico de partidas internas de um jogador."""
         async with get_session() as session:
             result_mp = await session.execute(
                 select(MatchPlayer)
@@ -273,7 +273,6 @@ class MatchRepository:
                 .where(Match.id.in_(match_ids))
                 .where(Match.status == MatchStatus.FINISHED)
                 .order_by(desc(Match.finished_at))
-                .limit(limit)
             )
             matches = result_matches.scalars().all()
 

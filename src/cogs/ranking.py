@@ -85,6 +85,84 @@ class RankingPaginationView(BaseInteractiveView):
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
 
 
+class HistoryPaginationView(BaseInteractiveView):
+    PER_PAGE = 10
+
+    def __init__(self, history: list, player_name: str, ctx):
+        super().__init__(timeout=120)
+        self.history = history
+        self.player_name = player_name
+        self.ctx = ctx
+        self.current_page = 0
+        self.total_pages = max(1, (len(history) + self.PER_PAGE - 1) // self.PER_PAGE)
+        self.total_wins = sum(1 for h in history if h['won'] is True)
+        self.total_losses = sum(1 for h in history if h['won'] is False)
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_button.disabled = (self.current_page == 0)
+        self.next_button.disabled = (self.current_page == self.total_pages - 1)
+        self.counter_button.label = f"{self.current_page + 1}/{self.total_pages}"
+        if self.total_pages == 1:
+            self.prev_button.disabled = True
+            self.next_button.disabled = True
+
+    def create_embed(self):
+        total = len(self.history)
+        wr = (self.total_wins / total * 100) if total > 0 else 0
+
+        embed = discord.Embed(
+            title=f"📜 Histórico Interno — {self.player_name}",
+            color=0x3498db
+        )
+        embed.description = (
+            f"**{total}** partida(s) registradas\n"
+            f"`{self.total_wins}V` `{self.total_losses}D` • **{wr:.0f}%** WR"
+        )
+
+        start = self.current_page * self.PER_PAGE
+        batch = self.history[start:start + self.PER_PAGE]
+
+        lines = []
+        for h in batch:
+            if h['won'] is True:
+                result_icon, result_label = "🟦", "Vitória"
+            elif h['won'] is False:
+                result_icon, result_label = "🟥", "Derrota"
+            else:
+                result_icon, result_label = "⬜", "N/A"
+
+            side_str = f"· {h['side'].capitalize()}" if h['side'] else ""
+            ts = f"<t:{int(h['finished_at'].timestamp())}:R>" if h.get('finished_at') else "N/A"
+            lines.append(f"{result_icon} **#{h['match_id']}** — {result_label} {side_str}\n└ {ts}")
+
+        embed.add_field(name="\u200b", value="\n".join(lines), inline=False)
+        embed.set_footer(text="Use .partida <ID> para detalhes · 10 por página")
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.ctx.author.id:
+            return True
+        await interaction.response.send_message("✋ Apenas o autor do comando pode navegar aqui.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page -= 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="1/1", style=discord.ButtonStyle.gray, disabled=True)
+    async def counter_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass
+
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page += 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+
 class Ranking(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -209,16 +287,10 @@ class Ranking(commands.Cog):
             main_lane = player.main_lane.value.capitalize() if player.main_lane else "N/A"
             sec_lane = player.secondary_lane.value.capitalize() if player.secondary_lane else "N/A"
 
-            # Streak info
             streak = getattr(player, 'current_win_streak', 0) or 0
             best_streak = getattr(player, 'best_win_streak', 0) or 0
-            streak_info = ""
-            if streak >= 3:
-                streak_info = f"\n🔥 **Sequência atual:** {streak} vitória(s)"
-            if best_streak > 0:
-                streak_info += f"\n🏅 **Melhor sequência:** {best_streak} vitória(s)"
 
-            embed.description = f"🆔 **Conta:** {riot_link}\n🗺️ **Rotas:** {main_lane} / {sec_lane}{streak_info}"
+            embed.description = f"🆔 **Conta:** {riot_link}\n🗺️ **Rotas:** {main_lane} / {sec_lane}"
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             def format_rank_detailed(data):
@@ -253,15 +325,28 @@ class Ranking(commands.Cog):
 
             stats_block = (
                 f"```yaml\n"
-                f"MMR:  {player.mmr}\n"
+                f"MMR:   {player.mmr}\n"
                 f"Jogos: {total_ih}\n"
-                f"V/D:  {player.wins} - {player.losses}\n"
-                f"Win%: {wr_ih:.1f}%\n"
-                f"MVP:  {mvp_count}x\n"
-                f"iMVP: {imvp_count}x\n"
+                f"V/D:   {player.wins} - {player.losses}\n"
+                f"Win%:  {wr_ih:.1f}%\n"
                 f"```"
             )
-            embed.add_field(name="🏆 Liga Interna", value=stats_block, inline=False)
+            embed.add_field(name="🏆 Liga Interna", value=stats_block, inline=True)
+
+            awards_lines = []
+            if mvp_count > 0:
+                awards_lines.append(f"⭐ MVP — **{mvp_count}x**")
+            if imvp_count > 0:
+                awards_lines.append(f"💀 iMVP — **{imvp_count}x**")
+            if streak >= 3:
+                awards_lines.append(f"🔥 Sequência — **{streak} seguidas**")
+            if best_streak > 0:
+                awards_lines.append(f"🏅 Recorde — **{best_streak} seguidas**")
+
+            if awards_lines:
+                embed.add_field(name="🎖️ Conquistas", value="\n".join(awards_lines), inline=True)
+            else:
+                embed.add_field(name="\u200b", value="\u200b", inline=True)
             embed.set_footer(text=f"System ID: {player.discord_id}")
 
             await ctx.reply(embed=embed)
@@ -451,16 +536,21 @@ class Ranking(commands.Cog):
 
         embed = discord.Embed(title=f"⚔️ Partida #{match_id}", color=color)
 
-        # Cabeçalho
         created_ts = f"<t:{int(match['created_at'].timestamp())}:F>" if match.get('created_at') else "N/A"
         finished_ts = f"<t:{int(match['finished_at'].timestamp())}:R>" if match.get('finished_at') else "—"
-        embed.description = f"**Status:** {status_label}\n**Criada:** {created_ts}\n**Encerrada:** {finished_ts}"
 
-        # Vencedor
+        embed.description = (
+            f"{status_label}\n"
+            f"🕐 **Criada:** {created_ts}\n"
+            f"🏁 **Encerrada:** {finished_ts}"
+        )
+
         if match['winning_side']:
             winner_emoji = "🔵" if match['winning_side'] == 'blue' else "🔴"
             winner_name = "BLUE" if match['winning_side'] == 'blue' else "RED"
-            embed.description += f"\n**Vencedor:** {winner_emoji} **Time {winner_name}**"
+            embed.description += f"\n\n🏆 **Vencedor:** {winner_emoji} Time **{winner_name}**"
+
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         def fmt_team(team):
             if not team:
@@ -468,11 +558,11 @@ class Ranking(commands.Cog):
             lines = []
             for p in team:
                 mmr_str = f"({p['mmr_before']} MMR)" if p.get('mmr_before') else f"({p['mmr']} MMR)"
-                lines.append(f"• **{p['name']}** {mmr_str}")
+                lines.append(f"• **{p['name']}** — `{mmr_str}`")
             real_players = [p for p in team if p.get('mmr_before') or p.get('mmr')]
             mmrs = [p.get('mmr_before') or p.get('mmr', 0) for p in real_players]
             avg = sum(mmrs) // len(mmrs) if mmrs else 0
-            lines.append(f"\n📊 **Média:** {avg} MMR")
+            lines.append(f"─────────────\n📊 Média: **{avg} MMR**")
             return "\n".join(lines)
 
         embed.add_field(name="🔵 Time Azul", value=fmt_team(match['blue_team']), inline=True)
@@ -491,39 +581,13 @@ class Ranking(commands.Cog):
         if not player:
             return await ctx.reply(f"❌ {target_user.mention} não está registrado.")
 
-        history = await MatchRepository.get_player_internal_history(player.discord_id, limit=10)
+        history = await MatchRepository.get_player_internal_history(player.discord_id)
         if not history:
             return await ctx.reply(f"📭 **{player.riot_name}** ainda não jogou nenhuma partida na Liga.")
 
-        embed = discord.Embed(
-            title=f"📜 Histórico Interno — {player.riot_name}",
-            color=0x3498db
-        )
-
-        total = len(history)
-        wins = sum(1 for h in history if h['won'] is True)
-        losses = sum(1 for h in history if h['won'] is False)
-        wr = (wins / total * 100) if total > 0 else 0
-
-        embed.description = f"Últimas {total} partida(s) • `{wins}V` `{losses}D` ({wr:.0f}% WR)"
-
-        lines = []
-        for h in history:
-            if h['won'] is True:
-                result_icon = "🟦 Vitória"
-            elif h['won'] is False:
-                result_icon = "🟥 Derrota"
-            else:
-                result_icon = "⬜ N/A"
-
-            side_str = f"({h['side'].capitalize()})" if h['side'] else ""
-            ts = f"<t:{int(h['finished_at'].timestamp())}:R>" if h.get('finished_at') else "N/A"
-            lines.append(f"`#{h['match_id']}` {result_icon} {side_str} — {ts}")
-
-        embed.add_field(name="Resultados", value="\n".join(lines), inline=False)
-        embed.set_footer(text="Use .partida <ID> para ver detalhes de uma partida")
-
-        await ctx.reply(embed=embed)
+        view = HistoryPaginationView(history, player.riot_name, ctx)
+        msg = await ctx.reply(embed=view.create_embed(), view=view)
+        view.message = msg
 
     # --- CONFRONTO DIRETO (H2H) ---
     @commands.command(name="h2h")
@@ -554,22 +618,18 @@ class Ranking(commands.Cog):
             color=0x9b59b6
         )
 
-        # Visão geral
-        embed.description = f"**{data['total']}** partida(s) em comum na Liga."
+        embed.description = (
+            f"**{data['total']}** partida(s) em comum na Liga\n"
+            f"Adversários: **{data['as_opponents']}** · Parceiros: **{data['as_teammates']}**"
+        )
+
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         # Como adversários
         if data['as_opponents'] > 0:
             p1_wr = (data['p1_wins'] / data['as_opponents'] * 100) if data['as_opponents'] > 0 else 0
             p2_wr = (data['p2_wins'] / data['as_opponents'] * 100) if data['as_opponents'] > 0 else 0
 
-            vs_block = (
-                f"```yaml\n"
-                f"{p1.riot_name:<20} {data['p1_wins']}V ({p1_wr:.0f}%)\n"
-                f"{p2.riot_name:<20} {data['p2_wins']}V ({p2_wr:.0f}%)\n"
-                f"```"
-            )
-
-            # Quem lidera
             if data['p1_wins'] > data['p2_wins']:
                 leader = f"🏆 **{p1.riot_name}** lidera o confronto!"
             elif data['p2_wins'] > data['p1_wins']:
@@ -577,9 +637,17 @@ class Ranking(commands.Cog):
             else:
                 leader = "🤝 **Empate** no confronto direto!"
 
+            vs_block = (
+                f"```yaml\n"
+                f"{p1.riot_name:<20} {data['p1_wins']}V ({p1_wr:.0f}%)\n"
+                f"{p2.riot_name:<20} {data['p2_wins']}V ({p2_wr:.0f}%)\n"
+                f"```"
+                f"{leader}"
+            )
+
             embed.add_field(
                 name=f"⚔️ Como Adversários ({data['as_opponents']} jogo(s))",
-                value=vs_block + leader,
+                value=vs_block,
                 inline=False
             )
 
@@ -589,7 +657,7 @@ class Ranking(commands.Cog):
             duo_wr = (data['together_wins'] / duo_total * 100) if duo_total > 0 else 0
             embed.add_field(
                 name=f"🤝 Como Parceiros ({data['as_teammates']} jogo(s))",
-                value=f"`{data['together_wins']}V` `{data['together_losses']}D` ({duo_wr:.0f}% WR juntos)",
+                value=f"`{data['together_wins']}V` `{data['together_losses']}D` — **{duo_wr:.0f}%** WR juntos",
                 inline=False
             )
 
@@ -613,7 +681,11 @@ class Ranking(commands.Cog):
                 ts = f"<t:{int(m['finished_at'].timestamp())}:R>" if m.get('finished_at') else ""
                 lines.append(f"`#{m['match_id']}` {tag} {result} {ts}")
 
-            embed.add_field(name="📋 Últimas Partidas", value="\n".join(lines), inline=False)
+            embed.add_field(
+                name="📋 Últimas Partidas em Comum",
+                value="\n".join(lines),
+                inline=False
+            )
 
         embed.set_footer(text=f"Total de {data['total']} partida(s) em comum")
         await ctx.reply(embed=embed)

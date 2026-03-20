@@ -58,15 +58,16 @@ class Community(commands.Cog):
 
         if leveled_up:
             await message.add_reaction("🆙")
-            # Notificação de level up com embed
             xp_next = int(new_level * 100 * 1.2)
             embed = discord.Embed(
                 title="⬆️ LEVEL UP!",
-                description=f"🎉 {message.author.mention} subiu para o **Nível {new_level}**!",
+                description=(
+                    f"{message.author.mention} subiu para o **Nível {new_level}**!\n"
+                    f"Próximo nível em **{xp_next} XP**"
+                ),
                 color=0xffd700
             )
             embed.set_thumbnail(url=message.author.display_avatar.url)
-            embed.set_footer(text=f"Próximo nível em {xp_next} XP")
             await message.channel.send(embed=embed, delete_after=20)
 
     @commands.Cog.listener()
