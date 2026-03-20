@@ -277,8 +277,37 @@ class Agenda(commands.Cog):
             pass
 
     @commands.command(name="agenda")
-    async def agenda(self, ctx: commands.Context):
-        """Lista os próximos eventos agendados abertos."""
+    async def agenda(self, ctx: commands.Context, event_id: int = None):
+        """Lista eventos agendados ou exibe o embed completo de um evento específico."""
+
+        # .agenda <ID> — reposta o embed com botões de um evento específico
+        if event_id is not None:
+            event = await EventRepository.get_event(event_id)
+            if not event:
+                return await ctx.reply(f"❌ Evento #{event_id} não encontrado.")
+            if event['guild_id'] != ctx.guild.id:
+                return await ctx.reply("❌ Este evento não pertence a este servidor.")
+
+            view = AgendaView(event_id, event['max_players'])
+            if event['status'] != 'open':
+                for item in view.children:
+                    item.disabled = True
+            else:
+                self.bot.add_view(view)
+
+            msg = await ctx.send(embed=build_embed(event, ctx.guild), view=view)
+
+            # Atualiza referência da mensagem para que _refresh_event_message funcione
+            if event['status'] == 'open':
+                await EventRepository.set_message(event_id, ctx.channel.id, msg.id)
+
+            try:
+                await ctx.message.delete()
+            except discord.Forbidden:
+                pass
+            return
+
+        # .agenda — lista resumo de todos os eventos abertos
         events = await EventRepository.get_open_events(ctx.guild.id)
 
         if not events:
@@ -306,7 +335,7 @@ class Agenda(commands.Cog):
                 inline=False,
             )
 
-        embed.set_footer(text="Use .cancelar_agenda <ID> para cancelar · .iniciar_agenda <ID> para iniciar")
+        embed.set_footer(text=".agenda <ID> para ver detalhes · .cancelar_agenda <ID> para cancelar")
         await ctx.reply(embed=embed)
 
     @commands.command(name="cancelar_agenda")

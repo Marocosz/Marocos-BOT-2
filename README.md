@@ -14,6 +14,7 @@ Bot Discord para gerenciamento completo de uma liga interna de League of Legends
 - [Integrações](#integrações)
 - [Fluxos Internos](#fluxos-internos)
 - [Referência de Comandos](#referência-de-comandos)
+- [Sistema de Agenda](#sistema-de-agenda)
 - [Sistema de Anúncios](#sistema-de-anúncios)
 - [Configuração e Instalação](#configuração-e-instalação)
 - [Limitações e Melhorias](#limitações-e-melhorias)
@@ -51,9 +52,10 @@ src/
 │   ├── lobby.py             # Fila, draft, resultado de partidas (maior módulo)
 │   ├── ranking.py           # Ranking, perfil, MMR, histórico, live
 │   ├── comunidade.py        # Sistema de XP/níveis e perfil social
+│   ├── agenda.py            # Eventos agendados com confirmação e lembretes automáticos
 │   ├── tracking.py          # Background task de rastreamento de elo
 │   ├── admin.py             # Comandos administrativos
-│   ├── general.py           # Sistema de ajuda interativo
+│   ├── general.py           # Sistema de ajuda interativo (7 seções)
 │   ├── utility.py           # Ferramentas de meta e builds
 │   └── zoeira.py            # Easter egg
 ├── database/
@@ -197,7 +199,7 @@ Loop a cada 10 minutos que:
 
 ### Histórico Interno (`.historico_liga`) e Detalhes (`.partida`)
 
-- `.historico_liga [@user]` — últimas 10 partidas internas com resultado (W/L), lado jogado e data
+- `.historico_liga [@user]` — **todas** as partidas internas com paginação (10/página), resultado (W/L), lado jogado e data. Cabeçalho exibe WR geral
 - `.partida <ID>` — detalhes completos: times, MMR snapshot no momento da partida, resultado, datas
 
 ### Confronto Direto (`.h2h @user1 @user2`)
@@ -360,7 +362,8 @@ on_voice_state_update → usuário entra com 2+ pessoas no canal
 | `.social` | `.perfil_social`, `.rank`, `.comunidade` | `[@user]` | Perfil de engajamento: XP, nível, voz, mensagens |
 | `.ranking_xp` | `.topxp`, `.top_social` | — | Top 10 por nível e XP |
 | `.fila` | — | — | Abre fila para nova partida |
-| `.ajuda` | `.help`, `.comandos` | — | Menu interativo de ajuda com 6 seções |
+| `.ajuda` | `.help`, `.comandos` | — | Menu interativo de ajuda com 7 seções |
+| `.agenda` | — | `[ID]` | Lista eventos abertos ou exibe embed completo de um evento específico |
 
 ### Ferramentas
 
@@ -383,6 +386,62 @@ on_voice_state_update → usuário entra com 2+ pessoas no canal
 | `.resetar` | — | Alterna entre modo debug e produção na fila |
 | `.clear` | — | Apaga últimas 1000 mensagens do bot (com confirmação) |
 | `.clear_all` | — | Apaga últimas 1000 mensagens de todos (com confirmação) |
+
+### Agenda (Admin)
+
+| Comando | Argumentos | Descrição |
+|---------|-----------|-----------|
+| `.agendar` | `<DD/MM/YYYY> <HH:MM> <Título>` | Cria evento com embed e botões de confirmação |
+| `.cancelar_agenda` | `<ID>` | Cancela evento e notifica confirmados por DM |
+| `.add_agenda` | `<ID> @user` | Adiciona jogador manualmente ao evento |
+| `.kick_agenda` | `<ID> @user` | Remove jogador do evento |
+| `.iniciar_agenda` | `<ID>` | Fecha inscrições e pinga todos os confirmados no canal |
+
+---
+
+## Sistema de Agenda
+
+Sistema para agendar eventos com antecedência, gerenciar confirmações e enviar lembretes automáticos por DM — completamente desacoplado da fila de partidas.
+
+### Fluxo básico
+
+```
+Admin: .agendar 21/03/2025 21:00 Sexta Ranqueada
+    → bot posta embed com botões [✅ Confirmar] [❌ Sair]
+    → jogadores clicam para confirmar (embed atualiza em tempo real)
+        ↓ (automático, sem ação manual)
+    → DM 24h antes → DM 30min antes para cada confirmado
+        ↓ (quando chegar a hora)
+    → Admin: .iniciar_agenda <ID>
+    → bot pinga todos os confirmados no canal + fecha inscrições
+    → Admin abre .fila manualmente com quem apareceu
+```
+
+### Lembretes automáticos
+
+Task em background (a cada 5 minutos) verifica eventos abertos e envia DM para cada confirmado:
+- **24 horas antes** do horário agendado
+- **30 minutos antes** do horário agendado
+
+Lembretes são enviados uma única vez (flags `notified_24h` / `notified_30min` no banco). Se o jogador tiver DMs fechadas, o bot ignora silenciosamente.
+
+### Views persistentes
+
+Os botões de confirmar/sair usam `custom_id` por evento (`agenda_confirm_{id}`) com `timeout=None`. Ao reiniciar o bot, o cog re-registra as views de todos os eventos abertos via `cog_load`, garantindo que os botões continuem funcionando mesmo após restart.
+
+### Recuperar embed de um evento
+
+Se a mensagem original subiu no histórico do canal e não é mais visível:
+
+```
+.agenda 3   → reposta o embed completo do evento #3 com os botões funcionando
+```
+
+A referência da mensagem no banco é atualizada para a nova mensagem, garantindo que futuras confirmações editem o embed correto.
+
+### Cancelamento
+
+`.cancelar_agenda <ID>` cancela o evento e envia DM de aviso para cada confirmado automaticamente.
 
 ---
 
