@@ -657,7 +657,7 @@ class Ranking(commands.Cog):
             duo_wr = (data['together_wins'] / duo_total * 100) if duo_total > 0 else 0
             embed.add_field(
                 name=f"🤝 Como Parceiros ({data['as_teammates']} jogo(s))",
-                value=f"`{data['together_wins']}V` `{data['together_losses']}D` — **{duo_wr:.0f}%** WR juntos\n",
+                value=f"`{data['together_wins']}V` `{data['together_losses']}D` — **{duo_wr:.0f}%** WR juntos",
                 inline=False
             )
 

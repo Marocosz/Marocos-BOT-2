@@ -323,7 +323,7 @@ class Agenda(commands.Cog):
             title="📅 Agenda de Eventos",
             color=0x3498db
         )
-        embed.description = f"**{len(events)}** evento(s) ativo(s)\n"
+        embed.description = f"**{len(events)}** evento(s) ativo(s)"
 
         embed.add_field(name="\u200b", value="\u200b", inline=False)
 
