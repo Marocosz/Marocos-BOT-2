@@ -431,16 +431,19 @@ class Agenda(commands.Cog):
 
         await EventRepository.start_event(event_id)
 
-        # Desabilita botões no embed original
+        # Desabilita botões no embed original (silencioso se não encontrar a mensagem)
         await self._refresh_event_message(ctx.guild, event_id, await EventRepository.get_event(event_id))
 
         # Pinga todos os confirmados
         mentions = " ".join(f"<@{pid}>" for pid in event['player_ids'])
-        await ctx.send(
-            f"🚀 **{event['title']}** está começando!\n"
-            f"{mentions}\n\n"
-            f"Aguardem o organizador abrir a `.fila`!"
+        total = len(event['player_ids'])
+        embed = discord.Embed(
+            title=f"📣 {event['title']}",
+            description=f"O evento foi iniciado! **{total}** confirmado(s) convocado(s).",
+            color=0x2ecc71
         )
+        embed.add_field(name="Confirmados", value=mentions, inline=False)
+        await ctx.send(embed=embed)
 
         try:
             await ctx.message.delete()
