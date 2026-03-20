@@ -190,6 +190,21 @@ Loop a cada 10 minutos que:
 | > 30 dias | 💀 Inativo |
 | Nunca | 👻 Fantasma |
 
+### Cargos Automáticos de Vencedor/Perdedor
+
+Ao registrar `.resultado`, o bot remove automaticamente os cargos de vencedor e perdedor de todos os 10 jogadores da partida e reatribui conforme o resultado:
+
+- **Time vencedor** recebe o cargo de vencedor
+- **Time perdedor** recebe o cargo de perdedor
+
+Configuração (uma única vez):
+```
+.config_cargo vencedor @NomeDoCargoVencedor
+.config_cargo perdedor @NomeDoCardoPerdedor
+```
+
+> O bot precisa ter permissão de "Gerenciar Cargos" e estar acima dos cargos configurados na hierarquia do servidor.
+
 ### Streaks e Conquistas
 
 - `current_win_streak` e `best_win_streak` rastreados por jogador no banco
@@ -380,6 +395,7 @@ on_voice_state_update → usuário entra com 2+ pessoas no canal
 | `.resultado` | `<ID> <Blue\|Red>` | Registra resultado, atualiza MMR, streaks e lança MVP/iMVP |
 | `.anular` | `<ID>` | Cancela partida sem registrar stats |
 | `.recalcular_mmr` | `.recalc_mmr` | Recalcula MMR de todos os jogadores (dados cached) |
+| `.config_cargo` | `<vencedor\|perdedor> @Cargo` | Define cargo atribuído automaticamente após cada resultado |
 | `.config_aviso` | `<#canal>` | Define canal de notificações de elo (também usado pelo `announce.py`) |
 | `.forcar_check` | — | Força execução imediata do loop de rastreamento |
 | `.fake_elo` | `<@user> <TIER> <RANK> [SOLO\|FLEX]` | Testa notificações de elo |

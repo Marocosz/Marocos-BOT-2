@@ -623,17 +623,15 @@ class Ranking(commands.Cog):
             f"Adversários: **{data['as_opponents']}** · Parceiros: **{data['as_teammates']}**"
         )
 
-        embed.add_field(name="\u200b", value="\u200b", inline=False)
-
         # Como adversários
         if data['as_opponents'] > 0:
             p1_wr = (data['p1_wins'] / data['as_opponents'] * 100) if data['as_opponents'] > 0 else 0
             p2_wr = (data['p2_wins'] / data['as_opponents'] * 100) if data['as_opponents'] > 0 else 0
 
             if data['p1_wins'] > data['p2_wins']:
-                leader = f"🏆 **{p1.riot_name}** lidera o confronto!"
+                leader = f"🏆 **{p1.riot_name}** lidera o confronto!\n"
             elif data['p2_wins'] > data['p1_wins']:
-                leader = f"🏆 **{p2.riot_name}** lidera o confronto!"
+                leader = f"🏆 **{p2.riot_name}** lidera o confronto!\n"
             else:
                 leader = "🤝 **Empate** no confronto direto!"
 
@@ -657,7 +655,7 @@ class Ranking(commands.Cog):
             duo_wr = (data['together_wins'] / duo_total * 100) if duo_total > 0 else 0
             embed.add_field(
                 name=f"🤝 Como Parceiros ({data['as_teammates']} jogo(s))",
-                value=f"`{data['together_wins']}V` `{data['together_losses']}D` — **{duo_wr:.0f}%** WR juntos",
+                value=f"`{data['together_wins']}V` `{data['together_losses']}D` — **{duo_wr:.0f}%** WR juntos\n",
                 inline=False
             )
 

@@ -41,9 +41,21 @@ Novo sistema para agendar eventos com antecedência.
 
 **`.agenda`** — lista todos os eventos abertos com data, confirmados e vagas.
 
+**`.agenda <ID>`** — reposta o embed completo de um evento específico com os botões de confirmar/sair funcionando. Útil quando a mensagem original sumiu no histórico do canal.
+
 **Controles do admin:** `.cancelar_agenda`, `.add_agenda @user`, `.kick_agenda @user`, `.iniciar_agenda`
 
 **Lembretes automáticos por DM:** o bot avisa cada confirmado **24 horas** e **30 minutos** antes do evento começar.
+
+## Cargos Automáticos de Vencedor/Perdedor
+
+O bot agora atribui os cargos de vencedor e perdedor automaticamente ao registrar o `.resultado`, eliminando o processo manual.
+
+Ao finalizar uma partida, o bot remove os cargos antigos dos 10 jogadores e reatribui conforme o resultado: cargo de vencedor para o time vencedor, cargo de perdedor para o time perdedor.
+
+**Configuração inicial (admin):**
+`.config_cargo vencedor @Vencedor`
+`.config_cargo perdedor @Perdedor`
 
 ## Help Atualizado
 

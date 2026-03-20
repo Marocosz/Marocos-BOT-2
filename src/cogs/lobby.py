@@ -1,7 +1,7 @@
 import discord
 import random
 from discord.ext import commands
-from src.database.repositories import PlayerRepository, MatchRepository, LobbyRepository
+from src.database.repositories import PlayerRepository, MatchRepository, LobbyRepository, GuildRepository
 from src.services.matchmaker import MatchMaker
 import asyncio
 from src.utils.views import BaseInteractiveView
@@ -798,6 +798,42 @@ class Lobby(commands.Cog):
 
         print(f"[Lobby] MMR atualizado para {updated} jogador(es) após resultado.")
 
+    # --- CARGOS ---
+    async def _assign_match_roles(self, guild: discord.Guild, match_details: dict, winner_side: str):
+        """Remove cargos anteriores dos 10 jogadores e reatribui conforme resultado."""
+        winner_role_id, loser_role_id = await GuildRepository.get_match_roles(guild.id)
+        if not winner_role_id and not loser_role_id:
+            return  # Nenhum cargo configurado — ignora silenciosamente
+
+        winner_role = guild.get_role(winner_role_id) if winner_role_id else None
+        loser_role  = guild.get_role(loser_role_id)  if loser_role_id  else None
+
+        winning_team = match_details['blue_team'] if winner_side == 'BLUE' else match_details['red_team']
+        losing_team  = match_details['red_team']  if winner_side == 'BLUE' else match_details['blue_team']
+
+        all_players = winning_team + losing_team
+        roles_to_clear = [r for r in (winner_role, loser_role) if r]
+
+        for p in all_players:
+            member = guild.get_member(p['id'])
+            if not member:
+                continue
+            try:
+                # Remove ambos os cargos primeiro
+                if roles_to_clear:
+                    await member.remove_roles(*roles_to_clear, reason="Liga Interna — resultado da partida")
+                # Atribui o cargo correto
+                if p in winning_team and winner_role:
+                    await member.add_roles(winner_role, reason="Liga Interna — vencedor")
+                elif p in losing_team and loser_role:
+                    await member.add_roles(loser_role, reason="Liga Interna — perdedor")
+            except discord.Forbidden:
+                print(f"[Roles] Sem permissão para atribuir cargo a {p['name']}")
+            except Exception as e:
+                print(f"[Roles] Erro ao atribuir cargo a {p['name']}: {e}")
+
+        print(f"[Roles] Cargos atualizados para {len(all_players)} jogador(es).")
+
     # --- STREAKS ---
     async def _update_and_announce_streaks(self, channel: discord.TextChannel, match_details: dict, winner_side: str):
         """Atualiza streaks e anuncia marcos alcançados."""
@@ -903,10 +939,13 @@ class Lobby(commands.Cog):
             # 2. Atualiza e anuncia streaks
             await self._update_and_announce_streaks(ctx.channel, match_details, winner)
 
-            # 3. Inicia votações MVP/iMVP
+            # 3. Atribui cargos de vencedor/perdedor
+            await self._assign_match_roles(ctx.guild, match_details, winner)
+
+            # 4. Inicia votações MVP/iMVP
             await self._start_mvp_polls(ctx.channel, match_id, winner, match_details)
 
-            # 4. Reseta o lobby
+            # 5. Reseta o lobby
             await self.reset_lobby_state(match_id)
 
         elif status == "ALREADY_FINISHED":

@@ -23,6 +23,8 @@ def migrate():
 
         # --- Migrações originais ---
         add_column(cursor, "guild_configs", "tracking_channel_id", "BIGINT")
+        add_column(cursor, "guild_configs", "winner_role_id", "BIGINT")
+        add_column(cursor, "guild_configs", "loser_role_id", "BIGINT")
 
         for col, tipo in [("solo_tier", "VARCHAR"), ("solo_rank", "VARCHAR"),
                           ("solo_lp", "INTEGER"), ("last_rank_update", "DATETIME")]:

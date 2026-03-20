@@ -355,6 +355,17 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
 
             embed.add_field(
+                name="🎖️ Cargos Automáticos",
+                value=(
+                    "**`.config_cargo vencedor @Cargo`** — define cargo do time vencedor\n"
+                    "**`.config_cargo perdedor @Cargo`** — define cargo do time perdedor\n"
+                    "*(Atribuídos automaticamente após cada `.resultado`)*"
+                ),
+                inline=False,
+            )
+            embed.add_field(name="\u200b", value="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", inline=False)
+
+            embed.add_field(
                 name="📡 Rastreamento de Elo",
                 value=(
                     "**`.config_aviso #canal`** — define canal de alertas de promoção/queda\n"

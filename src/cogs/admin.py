@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
-from src.database.repositories import PlayerRepository
+from src.database.repositories import PlayerRepository, GuildRepository
 from src.services.matchmaker import MatchMaker
 
 logger = logging.getLogger("admin")
@@ -218,6 +218,33 @@ class Admin(commands.Cog):
         view = RecalcConfirmView(self, ctx)
         msg = await ctx.reply(embed=embed, view=view)
         view.message = msg
+
+
+    @commands.command(name="config_cargo")
+    @commands.has_permissions(administrator=True)
+    async def config_cargo(self, ctx: commands.Context, tipo: str, cargo: discord.Role):
+        """
+        Configura o cargo de vencedor ou perdedor da liga.
+        Uso: .config_cargo vencedor @Cargo  |  .config_cargo perdedor @Cargo
+        """
+        tipo = tipo.lower()
+        if tipo not in ('vencedor', 'perdedor'):
+            return await ctx.reply("❌ Tipo inválido. Use `vencedor` ou `perdedor`.\nEx: `.config_cargo vencedor @Vencedor`")
+
+        role_type = 'winner' if tipo == 'vencedor' else 'loser'
+        await GuildRepository.set_match_role(ctx.guild.id, role_type, cargo.id)
+
+        label = "Vencedor" if role_type == 'winner' else "Perdedor"
+        await ctx.reply(f"✅ Cargo de **{label}** definido para {cargo.mention}.", delete_after=15)
+
+    @config_cargo.error
+    async def config_cargo_error(self, ctx: commands.Context, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.reply("⛔ Apenas administradores podem usar este comando.", delete_after=8)
+        elif isinstance(error, commands.RoleNotFound):
+            await ctx.reply("❌ Cargo não encontrado. Mencione o cargo com @.", delete_after=8)
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.reply("❌ Uso: `.config_cargo vencedor @Cargo` ou `.config_cargo perdedor @Cargo`", delete_after=10)
 
 
 async def setup(bot: commands.Bot):

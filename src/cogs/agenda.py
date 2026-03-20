@@ -34,7 +34,6 @@ def build_embed(event: dict, guild: discord.Guild) -> discord.Embed:
     if event.get('description'):
         embed.description += f"\n\n📝 {event['description']}"
 
-    embed.add_field(name="\u200b", value="\u200b", inline=False)
 
     player_ids = event.get('player_ids', [])
     names = []
@@ -52,7 +51,7 @@ def build_embed(event: dict, guild: discord.Guild) -> discord.Embed:
 
     if event['status'] == 'open':
         if spots > 0:
-            embed.add_field(name="🆓 Vagas restantes", value=f"**{spots}**", inline=True)
+            embed.add_field(name="\n🆓 Vagas restantes", value=f"**{spots}**", inline=True)
         else:
             embed.add_field(name="🔒 Vagas", value="**Lotado!**", inline=True)
 

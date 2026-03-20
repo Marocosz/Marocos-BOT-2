@@ -34,6 +34,8 @@ class GuildConfig(Base):
     match_channel_id = Column(BigInteger, nullable=True)
     ranking_channel_id = Column(BigInteger, nullable=True)
     tracking_channel_id = Column(BigInteger, nullable=True)
+    winner_role_id = Column(BigInteger, nullable=True)
+    loser_role_id = Column(BigInteger, nullable=True)
 
 
 class Player(Base):

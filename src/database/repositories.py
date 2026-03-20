@@ -26,6 +26,30 @@ class GuildRepository:
             config = result.scalar_one_or_none()
             return config.tracking_channel_id if config else None
 
+    @staticmethod
+    async def get_match_roles(guild_id: int):
+        async with get_session() as session:
+            result = await session.execute(select(GuildConfig).where(GuildConfig.guild_id == guild_id))
+            config = result.scalar_one_or_none()
+            if not config:
+                return None, None
+            return config.winner_role_id, config.loser_role_id
+
+    @staticmethod
+    async def set_match_role(guild_id: int, role_type: str, role_id: int):
+        """role_type: 'winner' ou 'loser'"""
+        async with get_session() as session:
+            result = await session.execute(select(GuildConfig).where(GuildConfig.guild_id == guild_id))
+            config = result.scalar_one_or_none()
+            if config:
+                if role_type == 'winner':
+                    config.winner_role_id = role_id
+                else:
+                    config.loser_role_id = role_id
+            else:
+                kwargs = {'winner_role_id': role_id} if role_type == 'winner' else {'loser_role_id': role_id}
+                session.add(GuildConfig(guild_id=guild_id, **kwargs))
+
 
 # --- REPOSITÓRIO DE JOGADORES ---
 class PlayerRepository:
