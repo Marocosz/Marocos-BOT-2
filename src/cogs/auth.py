@@ -1,5 +1,6 @@
 import discord
 import random
+import asyncio
 from discord.ext import commands
 import unicodedata
 from src.utils.views import BaseInteractiveView
@@ -29,7 +30,19 @@ class VerifyView(BaseInteractiveView):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            summoner_data = await self.riot_service.get_summoner_by_puuid(self.puuid)
+            # Tenta até 3 vezes com 3s de intervalo (API da Riot tem cache de ícone)
+            current_icon = None
+            summoner_data = None
+            for attempt in range(3):
+                summoner_data = await self.riot_service.get_summoner_by_puuid(self.puuid)
+                if not summoner_data:
+                    break
+                current_icon = summoner_data.get('profileIconId')
+                print(f"[Verificação] Tentativa {attempt + 1}/3 — ícone atual: {current_icon} | esperado: {self.target_icon_id}")
+                if current_icon == self.target_icon_id:
+                    break
+                if attempt < 2:
+                    await asyncio.sleep(3)
 
             if not summoner_data:
                 await interaction.followup.send(
@@ -37,8 +50,6 @@ class VerifyView(BaseInteractiveView):
                     ephemeral=True
                 )
                 return
-
-            current_icon = summoner_data.get('profileIconId')
 
             if current_icon == self.target_icon_id:
                 full_data = {**self.account_data, 'profileIconId': current_icon}
@@ -96,9 +107,9 @@ class VerifyView(BaseInteractiveView):
                 self.stop()
             else:
                 await interaction.followup.send(
-                    f"❌ Ícone incorreto!\n"
+                    f"❌ Ícone incorreto após 3 tentativas!\n"
                     f"Atual: **{current_icon}** | Necessário: **{self.target_icon_id}**\n\n"
-                    f"⏳ A Riot pode demorar **1-2 minutos** para atualizar após a troca. Aguarde e tente novamente.",
+                    f"⏳ A Riot pode demorar **até 5 minutos** para atualizar. Aguarde e tente novamente.",
                     ephemeral=True
                 )
         except Exception as e:
