@@ -91,7 +91,8 @@ class VerifyView(BaseInteractiveView):
                 embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{current_icon}.png")
 
                 self.clear_items()
-                await interaction.edit_original_response(embed=embed, view=self)
+                await self.message.edit(embed=embed, view=self)
+                await interaction.followup.send("✅ Conta verificada com sucesso!", ephemeral=True)
                 self.stop()
             else:
                 await interaction.followup.send(
@@ -199,6 +200,9 @@ class Auth(commands.Cog):
                 return
 
             summoner_data = await self.riot_service.get_summoner_by_puuid(account_data['puuid'])
+            if not summoner_data:
+                await msg_wait.edit(content="❌ Não foi possível buscar os dados do summoner na Riot. Tente novamente.")
+                return
             current_icon_id = summoner_data['profileIconId']
 
             # Ícones básicos garantidamente existentes no LoL
@@ -238,6 +242,10 @@ class Auth(commands.Cog):
 
         except Exception as e:
             print(f"Erro .registrar: {e}")
+            try:
+                await msg_wait.delete()
+            except Exception:
+                pass
             await ctx.reply("💥 Erro interno ao conectar com a Riot.")
 
 
