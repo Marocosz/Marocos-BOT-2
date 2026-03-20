@@ -99,7 +99,7 @@ class VerifyView(BaseInteractiveView):
 
                 embed = discord.Embed(title="✅ Identidade Confirmada!", color=0x00ff00)
                 embed.description = f"Conta **{self.account_data['gameName']}** vinculada com sucesso."
-                embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{current_icon}.png")
+                embed.set_thumbnail(url=f"http://ddragon.leagueoflegends.com/cdn/{self.riot_service.ddragon_version}/img/profileicon/{current_icon}.png")
 
                 self.clear_items()
                 await self.message.edit(embed=embed, view=self)
@@ -222,7 +222,9 @@ class Auth(commands.Cog):
             while target_icon_id == current_icon_id:
                 target_icon_id = random.choice(BASE_ICONS)
 
-            icon_url = f"http://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/{target_icon_id}.png"
+            await self.riot_service.update_version()
+            ddragon_version = self.riot_service.ddragon_version
+            icon_url = f"http://ddragon.leagueoflegends.com/cdn/{ddragon_version}/img/profileicon/{target_icon_id}.png"
 
             embed = discord.Embed(
                 title="🛡️ Verificação de Segurança",
