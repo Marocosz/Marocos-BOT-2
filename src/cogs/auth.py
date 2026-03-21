@@ -17,8 +17,8 @@ VERIFY_TIMEOUT_MINUTES = 10
 VERIFY_INTERVAL_SECONDS = 20
 
 
-async def _complete_registration(discord_id, puuid, account_data, lanes, current_icon, riot_service, message):
-    """Finaliza o registro: salva no banco, calcula MMR, edita o embed."""
+async def _complete_registration(discord_id, puuid, account_data, lanes, current_icon, riot_service, message, channel, member):
+    """Finaliza o registro: salva no banco, calcula MMR, edita o embed e pinga no canal."""
     full_data = {**account_data, 'profileIconId': current_icon}
 
     await PlayerRepository.upsert_player(
@@ -66,6 +66,14 @@ async def _complete_registration(discord_id, puuid, account_data, lanes, current
 
     try:
         await message.edit(embed=embed, view=None)
+    except Exception:
+        pass
+
+    try:
+        await channel.send(
+            f"{member.mention} ✅ Sua conta **{account_data['gameName']}** foi vinculada com sucesso! "
+            f"Use `.perfil` para ver seus dados."
+        )
     except Exception:
         pass
 
@@ -173,9 +181,11 @@ class Auth(commands.Cog):
 
                 if current_icon == v['target_icon_id']:
                     self.pending_verifications.pop(discord_id, None)
+                    member = v['channel'].guild.get_member(discord_id)
                     await _complete_registration(
                         discord_id, v['puuid'], v['account_data'],
-                        v['lanes'], current_icon, self.riot_service, v['message']
+                        v['lanes'], current_icon, self.riot_service,
+                        v['message'], v['channel'], member
                     )
 
             except Exception as e:
