@@ -90,8 +90,11 @@ class VerifyView(BaseInteractiveView):
 
         try:
             summoner_data = await self.auth_cog.riot_service.get_summoner_by_puuid(self.puuid)
+            if summoner_data == "RIOT_SERVER_ERROR":
+                await interaction.followup.send("⚠️ Servidores da Riot instáveis. A verificação automática continuará tentando em background.", ephemeral=True)
+                return
             if not summoner_data:
-                await interaction.followup.send("⚠️ Não foi possível conectar com a Riot API. Aguarde, a verificação automática tentará em breve.", ephemeral=True)
+                await interaction.followup.send("⚠️ Não foi possível conectar com a Riot API. A verificação automática tentará em breve.", ephemeral=True)
                 return
 
             current_icon = summoner_data.get('profileIconId')
@@ -154,7 +157,7 @@ class Auth(commands.Cog):
         for discord_id, v in list(self.pending_verifications.items()):
             try:
                 summoner_data = await self.riot_service.get_summoner_by_puuid(v['puuid'])
-                if not summoner_data:
+                if not summoner_data or summoner_data == "RIOT_SERVER_ERROR":
                     continue
 
                 current_icon = summoner_data.get('profileIconId')
@@ -260,8 +263,11 @@ class Auth(commands.Cog):
                 return
 
             summoner_data = await self.riot_service.get_summoner_by_puuid(account_data['puuid'])
+            if summoner_data == "RIOT_SERVER_ERROR":
+                await msg_wait.edit(content="⚠️ Os servidores da Riot estão instáveis no momento. Tente novamente em alguns minutos.")
+                return
             if not summoner_data:
-                await msg_wait.edit(content="❌ Não foi possível buscar os dados do summoner na Riot. Tente novamente.")
+                await msg_wait.edit(content="❌ Conta encontrada, mas sem dados de summoner. A conta já jogou League of Legends?")
                 return
 
             current_icon_id = summoner_data['profileIconId']

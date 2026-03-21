@@ -35,12 +35,16 @@ class RiotAPI:
                         return await self._request(url) # Tenta novamente recursivamente
 
                     elif response.status == 403:
-                        print("⛔ ERRO 403: API Key expirada.")
+                        print(f"⛔ ERRO 403: API Key expirada ou sem permissão. URL: {url}")
                         return None
 
                     elif response.status == 404:
-                        # print("⚠️ ERRO 404: Recurso não encontrado.") # Silenciado para evitar spam no log de match
-                        return None 
+                        print(f"⚠️ ERRO 404: Recurso não encontrado. URL: {url}")
+                        return None
+
+                    elif response.status in (500, 502, 503, 504):
+                        print(f"⚠️ Erro {response.status} (servidor Riot instável): {url}")
+                        return "RIOT_SERVER_ERROR"
 
                     else:
                         print(f"⚠️ Erro {response.status}: {url}")
@@ -64,7 +68,10 @@ class RiotAPI:
             f"https://{self.platform_region}.api.riotgames.com"
             f"/lol/summoner/v4/summoners/by-puuid/{puuid}"
         )
-        return await self._request(url)
+        result = await self._request(url)
+        if result is None:
+            print(f"[Summoner] Retornou None para PUUID {puuid[:20]}... — verifique se a API key está válida ou se a conta nunca jogou LoL.")
+        return result
 
     async def get_rank_by_puuid(self, puuid: str):
         url = (
