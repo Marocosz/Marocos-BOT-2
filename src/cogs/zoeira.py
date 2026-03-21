@@ -10,7 +10,11 @@ class Zoeira(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.TONHAO_NAME = "Tonhão Calabresa"
-        self.TORRES_MENTION = "<@410171778971992085>" 
+        self.TORRES_MENTION = "<@410171778971992085>"
+        self.TORRES_ID = 410171778971992085
+
+        # --- TOGGLE: reagir com 🍅 em toda msg do Torres ---
+        self.torres_tomate_ativo = True
 
         # Lista de mensagens estruturadas (Target: None para não marcar)
         self.insults = [
@@ -32,7 +36,14 @@ class Zoeira(commands.Cog):
                 await message.add_reaction("<:marocosbot1:1484889563192234044>")
                 log.info(f"[Zoeira] Reagiu com marocosbot1 na msg de {message.author} em #{message.channel}")
             except Exception as e:
-                log.warning(f"[Zoeira] Falhou ao reagir: {e}")
+                log.warning(f"[Zoeira] Falhou ao reagir com marocosbot1: {e}")
+
+        if self.torres_tomate_ativo and message.author.id == self.TORRES_ID:
+            try:
+                await message.add_reaction("🍅")
+                log.info(f"[Zoeira] Reagiu com 🍅 na msg do Torres em #{message.channel}")
+            except Exception as e:
+                log.warning(f"[Zoeira] Falhou ao reagir com tomate: {e}")
 
     @commands.command(name="fdp")
     async def fdp_command(self, ctx: commands.Context):
