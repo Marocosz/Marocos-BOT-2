@@ -87,9 +87,11 @@ Vincula a conta Discord do usuário a uma conta Riot com verificação anti-frau
 
 1. Usuário informa `Nick#TAG`, lane principal e opcionalmente lane secundária
 2. Bot busca o PUUID na Riot API
-3. Gera número de ícone aleatório (0–28) e exibe embed pedindo para trocar o ícone
-4. Ao clicar no botão de verificação, compara o ícone atual do perfil com o solicitado
-5. Se confirmado: cria registro do jogador e calcula MMR inicial com base no rank atual
+3. Gera ícone aleatório (0–29) e exibe embed pedindo para trocar o ícone no cliente do LoL
+4. Bot verifica automaticamente a cada **60 segundos** por até **10 minutos** se o ícone foi trocado
+5. Botão "Já troquei!" disponível para tentativa manual imediata
+6. Se confirmado: cria registro do jogador e calcula MMR inicial com base no rank atual
+7. Se o usuário tentar `.registrar` novamente enquanto a verificação está pendente, recebe aviso com tempo restante
 
 ### Sistema de Fila e Partidas (`.fila`)
 
@@ -317,9 +319,9 @@ O bot utiliza extensivamente:
 ```
 .registrar Nick#TAG Lane → validação de input → limpeza Unicode
     → Riot API: busca PUUID → gera ícone aleatório → embed de verificação
-        ↓ (clique no botão, timeout 180s)
+        ↓ (background task a cada 60s, até 10 minutos)
     → Riot API: busca ícone atual → compara com solicitado
-        ↓ (match)
+        ↓ (match detectado automaticamente)
     → cria Player no DB → Riot API: busca rank → calcula MMR inicial → salva
 ```
 
@@ -409,6 +411,7 @@ on_voice_state_update → usuário entra com 2+ pessoas no canal
 |---------|-----------|-----------|
 | `.agendar` | `<DD/MM/YYYY> <HH:MM> <Título>` | Cria evento com embed e botões de confirmação |
 | `.cancelar_agenda` | `<ID>` | Cancela evento e notifica confirmados por DM |
+| `.anular_agenda` | `<ID>` | Cancela evento silenciosamente (sem DM) |
 | `.add_agenda` | `<ID> @user` | Adiciona jogador manualmente ao evento |
 | `.kick_agenda` | `<ID> @user` | Remove jogador do evento |
 | `.iniciar_agenda` | `<ID>` | Fecha inscrições e pinga todos os confirmados no canal |

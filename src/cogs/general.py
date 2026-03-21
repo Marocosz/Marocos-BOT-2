@@ -239,7 +239,8 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(
                 name="🛡️ Controles do Admin",
                 value=(
-                    "**`.cancelar_agenda <ID>`** — cancela e envia DM para os confirmados\n"
+                    "**`.cancelar_agenda <ID>`** — cancela e avisa confirmados por DM\n"
+                    "**`.anular_agenda <ID>`** — cancela silenciosamente (sem DM)\n"
                     "**`.add_agenda <ID> @user`** — adiciona membro manualmente\n"
                     "**`.kick_agenda <ID> @user`** — remove membro da lista\n"
                     "**`.iniciar_agenda <ID>`** — fecha inscrições e pinga todos no canal"
@@ -347,7 +348,8 @@ class HelpSelect(discord.ui.Select):
                 name="📅 Gestão de Agenda",
                 value=(
                     "**`.agendar DD/MM/YYYY HH:MM Título`** — cria evento\n"
-                    "**`.cancelar_agenda <ID>`** — cancela e notifica confirmados\n"
+                    "**`.cancelar_agenda <ID>`** — cancela e notifica confirmados por DM\n"
+                    "**`.anular_agenda <ID>`** — cancela silenciosamente (sem DM)\n"
                     "**`.add_agenda <ID> @user`** — adiciona membro\n"
                     "**`.kick_agenda <ID> @user`** — remove membro\n"
                     "**`.iniciar_agenda <ID>`** — inicia o evento e pinga todos"
