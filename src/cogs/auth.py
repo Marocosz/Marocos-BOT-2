@@ -286,8 +286,7 @@ class Auth(commands.Cog):
             remaining = max(0, int((v['expires_at'] - datetime.utcnow()).total_seconds() / 60))
             return await ctx.reply(
                 f"⏳ Você já tem uma verificação em andamento para **{v['account_data']['gameName']}**.\n"
-                f"Aguarde até **{remaining} minuto(s)** ou peça ao admin para cancelar.",
-                delete_after=20
+                f"Aguarde até **{remaining} minuto(s)** ou peça ao admin para cancelar."
             )
 
         lanes_data = {'main': main_lane, 'sec': sec_lane}
@@ -375,14 +374,14 @@ class Auth(commands.Cog):
         # Admin pode desvincular qualquer um; usuário comum só a si mesmo
         if membro and membro != ctx.author:
             if not ctx.author.guild_permissions.administrator:
-                return await ctx.reply("⛔ Apenas administradores podem desvincular a conta de outro usuário.", delete_after=10)
+                return await ctx.reply("⛔ Apenas administradores podem desvincular a conta de outro usuário.")
             target = membro
         else:
             target = ctx.author
 
         player = await PlayerRepository.get_player_by_discord_id(target.id)
         if not player:
-            return await ctx.reply(f"❌ **{target.display_name}** não está registrado no bot.", delete_after=10)
+            return await ctx.reply(f"❌ **{target.display_name}** não está registrado no bot.")
 
         riot_name = player.riot_name or "conta desconhecida"
 
@@ -402,7 +401,7 @@ class Auth(commands.Cog):
     @desvincular.error
     async def desvincular_error(self, ctx, error):
         if isinstance(error, commands.MemberNotFound):
-            await ctx.reply("❌ Membro não encontrado. Mencione alguém do servidor.", delete_after=8)
+            await ctx.reply("❌ Membro não encontrado. Mencione alguém do servidor.")
 
 
 async def setup(bot: commands.Bot):

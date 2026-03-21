@@ -43,10 +43,10 @@ class ClearConfirmationView(discord.ui.View):
             except:
                 pass
             await interaction.message.delete()
-            await self.ctx.channel.send(f"✅ Limpeza concluída! ({deleted_count} mensagens apagadas).", delete_after=5)
+            await self.ctx.channel.send(f"✅ Limpeza concluída! ({deleted_count} mensagens apagadas).")
         except Exception as e:
             logger.error(f"Erro na limpeza: {e}")
-            await self.ctx.channel.send(f"⛔ ERRO: {e}", delete_after=10)
+            await self.ctx.channel.send(f"⛔ ERRO: {e}")
 
     @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary)
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -235,16 +235,16 @@ class Admin(commands.Cog):
         await GuildRepository.set_match_role(ctx.guild.id, role_type, cargo.id)
 
         label = "Vencedor" if role_type == 'winner' else "Perdedor"
-        await ctx.reply(f"✅ Cargo de **{label}** definido para {cargo.mention}.", delete_after=15)
+        await ctx.reply(f"✅ Cargo de **{label}** definido para {cargo.mention}.")
 
     @config_cargo.error
     async def config_cargo_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.MissingPermissions):
-            await ctx.reply("⛔ Apenas administradores podem usar este comando.", delete_after=8)
+            await ctx.reply("⛔ Apenas administradores podem usar este comando.")
         elif isinstance(error, commands.RoleNotFound):
-            await ctx.reply("❌ Cargo não encontrado. Mencione o cargo com @.", delete_after=8)
+            await ctx.reply("❌ Cargo não encontrado. Mencione o cargo com @.")
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.reply("❌ Uso: `.config_cargo vencedor @Cargo` ou `.config_cargo perdedor @Cargo`", delete_after=10)
+            await ctx.reply("❌ Uso: `.config_cargo vencedor @Cargo` ou `.config_cargo perdedor @Cargo`")
 
 
 async def setup(bot: commands.Bot):

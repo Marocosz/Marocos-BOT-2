@@ -68,7 +68,7 @@ class Community(commands.Cog):
                 color=0xffd700
             )
             embed.set_thumbnail(url=message.author.display_avatar.url)
-            await message.channel.send(embed=embed, delete_after=20)
+            await message.channel.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
@@ -228,7 +228,7 @@ class Community(commands.Cog):
             mins = p.voice_minutes % 60
             voice_str = f"{hours}h{mins}m" if hours > 0 else f"{mins}m"
 
-            rank_text += f"{icon} **{display_name}** • Nível **{p.level}** • 🎙️ {voice_str}\n"
+            rank_text += f"{icon} **{display_name}** • Nível **{p.level}** • 💬 {p.messages_sent} msgs • 🎙️ {voice_str}\n"
 
         embed.add_field(name="Top 10 Geral", value=rank_text, inline=False)
         embed.set_footer(text="Continue interagindo para subir no ranking!")

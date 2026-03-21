@@ -367,7 +367,6 @@ class Agenda(commands.Cog):
 
         await ctx.reply(
             f"🗑️ Evento **#{event_id} — {event['title']}** anulado silenciosamente (sem notificação aos confirmados).",
-            delete_after=15
         )
         try:
             await ctx.message.delete()
@@ -418,8 +417,7 @@ class Agenda(commands.Cog):
 
         await ctx.reply(
             f"✅ Evento **#{event_id} — {event['title']}** cancelado.\n"
-            f"📩 {sent} confirmado(s) notificado(s) por DM.",
-            delete_after=15,
+            f"📩 {sent} confirmado(s) notificado(s) por DM."
         )
 
     @commands.command(name="add_agenda")
@@ -438,7 +436,7 @@ class Agenda(commands.Cog):
             return await ctx.reply(f"❌ **{membro.display_name}** já está confirmado no evento #{event_id}.")
 
         await self._refresh_event_message(ctx.guild, event_id, event)
-        await ctx.reply(f"✅ **{membro.display_name}** adicionado ao evento **#{event_id}**.", delete_after=10)
+        await ctx.reply(f"✅ **{membro.display_name}** adicionado ao evento **#{event_id}**.")
 
     @commands.command(name="kick_agenda")
     @commands.has_permissions(administrator=True)
@@ -453,7 +451,7 @@ class Agenda(commands.Cog):
             return await ctx.reply(f"❌ **{membro.display_name}** não está confirmado no evento #{event_id}.")
 
         await self._refresh_event_message(ctx.guild, event_id, event)
-        await ctx.reply(f"✅ **{membro.display_name}** removido do evento **#{event_id}**.", delete_after=10)
+        await ctx.reply(f"✅ **{membro.display_name}** removido do evento **#{event_id}**.")
 
     @commands.command(name="iniciar_agenda")
     @commands.has_permissions(administrator=True)
@@ -512,9 +510,9 @@ class Agenda(commands.Cog):
     @iniciar_agenda.error
     async def agenda_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.MissingPermissions):
-            await ctx.reply("⛔ Apenas administradores podem usar este comando.", delete_after=8)
+            await ctx.reply("⛔ Apenas administradores podem usar este comando.")
         elif isinstance(error, commands.MemberNotFound):
-            await ctx.reply("❌ Membro não encontrado. Mencione alguém do servidor.", delete_after=8)
+            await ctx.reply("❌ Membro não encontrado. Mencione alguém do servidor.")
         elif isinstance(error, commands.MissingRequiredArgument):
             examples = {
                 'agendar': '`.agendar 21/03/2025 21:00 Sexta Ranqueada`',
@@ -525,9 +523,9 @@ class Agenda(commands.Cog):
                 'iniciar_agenda': '`.iniciar_agenda <ID>`',
             }
             ex = examples.get(ctx.command.name, '')
-            await ctx.reply(f"❌ Argumento faltando. Ex: {ex}", delete_after=10)
+            await ctx.reply(f"❌ Argumento faltando. Ex: {ex}")
         elif isinstance(error, commands.BadArgument):
-            await ctx.reply("❌ Argumento inválido. O ID do evento deve ser um número.", delete_after=8)
+            await ctx.reply("❌ Argumento inválido. O ID do evento deve ser um número.")
         else:
             logger.error(f"Erro em comando de agenda: {error}")
 
