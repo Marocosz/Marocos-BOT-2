@@ -14,41 +14,53 @@ class RiotAPI:
         # Semáforo para limitar requisições simultâneas (Evita picos que causam 429)
         self.semaphore = asyncio.Semaphore(10) 
 
-    async def _request(self, url: str):
+    async def _request(self, url: str, _retries: int = 2):
         headers = {"X-Riot-Token": self.api_key}
+        timeout = aiohttp.ClientTimeout(total=15)
 
-        # DEBUG – você pode remover depois
         print(f"[RIOT API] GET -> {url}")
 
-        async with self.semaphore: # Entra na fila do semáforo
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as response:
+        async with self.semaphore:
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url, headers=headers) as response:
 
-                    if response.status == 200:
-                        return await response.json()
+                        if response.status == 200:
+                            return await response.json()
 
-                    elif response.status == 429:
-                        # Tratamento de Rate Limit
-                        retry_after = int(response.headers.get("Retry-After", 5))
-                        print(f"⚠️ Rate Limit (429)! Esperando {retry_after}s para tentar novamente...")
-                        await asyncio.sleep(retry_after)
-                        return await self._request(url) # Tenta novamente recursivamente
+                        elif response.status == 429:
+                            retry_after = int(response.headers.get("Retry-After", 5))
+                            print(f"⚠️ Rate Limit (429)! Esperando {retry_after}s...")
+                            await asyncio.sleep(retry_after)
+                            return await self._request(url, _retries)
 
-                    elif response.status == 403:
-                        print(f"⛔ ERRO 403: API Key expirada ou sem permissão. URL: {url}")
-                        return None
+                        elif response.status == 403:
+                            print(f"⛔ ERRO 403: API Key expirada ou sem permissão. URL: {url}")
+                            return None
 
-                    elif response.status == 404:
-                        print(f"⚠️ ERRO 404: Recurso não encontrado. URL: {url}")
-                        return None
+                        elif response.status == 404:
+                            print(f"⚠️ ERRO 404: Recurso não encontrado. URL: {url}")
+                            return None
 
-                    elif response.status in (500, 502, 503, 504):
-                        print(f"⚠️ Erro {response.status} (servidor Riot instável): {url}")
-                        return "RIOT_SERVER_ERROR"
+                        elif response.status in (500, 502, 503, 504):
+                            if _retries > 0:
+                                print(f"⚠️ Erro {response.status} — tentando novamente em 3s... ({_retries} restante(s))")
+                                await asyncio.sleep(3)
+                                return await self._request(url, _retries - 1)
+                            print(f"⛔ Erro {response.status} após retries (servidor Riot instável): {url}")
+                            return "RIOT_SERVER_ERROR"
 
-                    else:
-                        print(f"⚠️ Erro {response.status}: {url}")
-                        return None
+                        else:
+                            print(f"⚠️ Erro {response.status}: {url}")
+                            return None
+
+            except asyncio.TimeoutError:
+                if _retries > 0:
+                    print(f"⚠️ Timeout na requisição — tentando novamente... ({_retries} restante(s)) URL: {url}")
+                    await asyncio.sleep(3)
+                    return await self._request(url, _retries - 1)
+                print(f"⛔ Timeout após retries: {url}")
+                return "RIOT_SERVER_ERROR"
 
     # --- MÉTODOS DE CONTA E SUMMONER (Mantidos) ---
 
