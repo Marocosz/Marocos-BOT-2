@@ -2,6 +2,9 @@ import discord
 from discord.ext import commands
 import random
 import asyncio
+import logging
+
+log = logging.getLogger(__name__)
 
 class Zoeira(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -25,9 +28,11 @@ class Zoeira(commands.Cog):
         if message.author.bot:
             return
         if random.random() < 0.10:  # ~1 em cada 10 msgs
-            emoji = self.bot.get_emoji(1484889563192234044)
-            if emoji:
-                await message.add_reaction(emoji)
+            try:
+                await message.add_reaction("<:marocosbot1:1484889563192234044>")
+                log.info(f"[Zoeira] Reagiu com marocosbot1 na msg de {message.author} em #{message.channel}")
+            except Exception as e:
+                log.warning(f"[Zoeira] Falhou ao reagir: {e}")
 
     @commands.command(name="fdp")
     async def fdp_command(self, ctx: commands.Context):
