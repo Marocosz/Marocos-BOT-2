@@ -20,6 +20,15 @@ class Zoeira(commands.Cog):
             {'target': 'Torres', 'text': "Torres, você é tão fofuxo, o meu salame boyzinho, lindinho.", 'tag': self.TORRES_MENTION}
         ]
 
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot:
+            return
+        if random.random() < 0.10:  # ~1 em cada 10 msgs
+            emoji = self.bot.get_emoji(1484889563192234044)
+            if emoji:
+                await message.add_reaction(emoji)
+
     @commands.command(name="fdp")
     async def fdp_command(self, ctx: commands.Context):
         """Manda uma piada interna aleatória xingando o Tonhão ou o Torres."""
