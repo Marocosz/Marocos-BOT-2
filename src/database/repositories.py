@@ -67,6 +67,17 @@ class PlayerRepository:
             return result.scalars().all()
 
     @staticmethod
+    async def delete_player(discord_id: int) -> bool:
+        """Remove o jogador do banco. Retorna True se existia."""
+        async with get_session() as session:
+            result = await session.execute(select(Player).where(Player.discord_id == discord_id))
+            player = result.scalar_one_or_none()
+            if not player:
+                return False
+            await session.delete(player)
+            return True
+
+    @staticmethod
     async def upsert_player(discord_id: int, riot_data: dict, lane_main: str = None, lane_sec: str = None):
         async with get_session() as session:
             result = await session.execute(select(Player).where(Player.discord_id == discord_id))

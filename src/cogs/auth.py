@@ -13,8 +13,8 @@ from src.database.repositories import PlayerRepository
 import logging
 logger = logging.getLogger("auth")
 
-# Timeout da verificação em background: 10 minutos
 VERIFY_TIMEOUT_MINUTES = 10
+VERIFY_INTERVAL_SECONDS = 20
 
 
 async def _complete_registration(discord_id, puuid, account_data, lanes, current_icon, riot_service, message):
@@ -86,47 +86,53 @@ class VerifyView(BaseInteractiveView):
             await interaction.response.send_message("Ei, saia daqui! Use .registrar para fazer o seu.", ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True)
+        # Desabilita o botão imediatamente
+        button.disabled = True
+        button.label = "⏳ Verificando..."
 
-        try:
-            summoner_data = await self.auth_cog.riot_service.get_summoner_by_puuid(self.puuid)
-            if summoner_data == "RIOT_SERVER_ERROR":
-                await interaction.followup.send("⚠️ Servidores da Riot instáveis. A verificação automática continuará tentando em background.", ephemeral=True)
-                return
-            if not summoner_data:
-                await interaction.followup.send("⚠️ Não foi possível conectar com a Riot API. A verificação automática tentará em breve.", ephemeral=True)
-                return
+        embed_aguardo = discord.Embed(
+            title="⏳ Verificando seu ícone...",
+            description=(
+                f"Troca registrada! Aguardando a API da Riot confirmar o ícone **#{self.target_icon_id}**.\n\n"
+                f"**Não troque o ícone** até o cadastro ser concluído.\n"
+                f"O bot tenta a cada **{VERIFY_INTERVAL_SECONDS}s** por até **{VERIFY_TIMEOUT_MINUTES} minutos**."
+            ),
+            color=0xffcc00
+        )
+        embed_aguardo.set_thumbnail(url=self.message.embeds[0].thumbnail.url if self.message.embeds else discord.Embed.Empty)
 
-            current_icon = summoner_data.get('profileIconId')
-            logger.info(f"[Verificação manual] ícone atual: {current_icon} | esperado: {self.target_icon_id}")
+        await interaction.response.edit_message(embed=embed_aguardo, view=self)
 
-            if current_icon == self.target_icon_id:
-                self.auth_cog.pending_verifications.pop(self.ctx.author.id, None)
-                self.stop()
-                await _complete_registration(
-                    self.ctx.author.id, self.puuid, self.account_data,
-                    self.lanes, current_icon, self.auth_cog.riot_service, self.message
-                )
-            else:
-                await interaction.followup.send(
-                    f"⏳ Ícone ainda não atualizado na API da Riot.\n"
-                    f"Atual: **{current_icon}** | Necessário: **{self.target_icon_id}**\n\n"
-                    f"A verificação automática está rodando em background e vai confirmar assim que a API atualizar (pode levar até {VERIFY_TIMEOUT_MINUTES} minutos).",
-                    ephemeral=True
-                )
-        except Exception as e:
-            logger.error(f"Erro verify manual: {e}")
-            await interaction.followup.send("💥 Erro interno ao verificar. A verificação automática continua rodando.", ephemeral=True)
+        # Marca que o botão foi clicado — background task já está rodando
+        if self.ctx.author.id in self.auth_cog.pending_verifications:
+            self.auth_cog.pending_verifications[self.ctx.author.id]['button_clicked'] = True
 
     async def on_timeout(self):
-        self.auth_cog.pending_verifications.pop(self.ctx.author.id, None)
+        v = self.auth_cog.pending_verifications.pop(self.ctx.author.id, None)
+        channel = self.ctx.channel
         try:
             embed = discord.Embed(
-                title="⏰ Verificação Expirada",
-                description="O tempo de verificação expirou. Use `.registrar` novamente para tentar.",
+                title="❌ Verificação Expirada",
+                description=(
+                    "O tempo de verificação esgotou sem que o ícone fosse detectado.\n\n"
+                    "Possíveis causas:\n"
+                    "• O ícone não foi trocado no cliente do LoL\n"
+                    "• A API da Riot demorou mais que o esperado para atualizar\n\n"
+                    "Use `.registrar` novamente para tentar."
+                ),
                 color=0xff0000
             )
             await self.message.edit(embed=embed, view=None)
+        except Exception:
+            pass
+
+        # Pinga a pessoa no canal com explicação
+        try:
+            game_name = v['account_data']['gameName'] if v else "sua conta"
+            await channel.send(
+                f"{self.ctx.author.mention} A verificação de **{game_name}** expirou após {VERIFY_TIMEOUT_MINUTES} minutos sem detectar o ícone correto.\n"
+                f"Use `.registrar` novamente. Se o problema persistir, pode ser instabilidade na API da Riot — tente mais tarde."
+            )
         except Exception:
             pass
 
@@ -135,7 +141,7 @@ class Auth(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.riot_service = RiotAPI()
-        # {discord_id: {puuid, target_icon_id, account_data, lanes, message, expires_at}}
+        # {discord_id: {puuid, target_icon_id, account_data, lanes, message, expires_at, channel, button_clicked}}
         self.pending_verifications: dict = {}
 
     async def cog_load(self):
@@ -144,24 +150,26 @@ class Auth(commands.Cog):
     async def cog_unload(self):
         self.background_verify.cancel()
 
-    @tasks.loop(seconds=60)
+    @tasks.loop(seconds=VERIFY_INTERVAL_SECONDS)
     async def background_verify(self):
         if not self.pending_verifications:
             return
 
         now = datetime.utcnow()
-        expired = [uid for uid, v in self.pending_verifications.items() if now >= v['expires_at']]
-        for uid in expired:
-            self.pending_verifications.pop(uid, None)
 
         for discord_id, v in list(self.pending_verifications.items()):
+            # Expirou — on_timeout da view cuida da mensagem, só remove do dict
+            if now >= v['expires_at']:
+                self.pending_verifications.pop(discord_id, None)
+                continue
+
             try:
                 summoner_data = await self.riot_service.get_summoner_by_puuid(v['puuid'])
                 if not summoner_data or summoner_data == "RIOT_SERVER_ERROR":
                     continue
 
                 current_icon = summoner_data.get('profileIconId')
-                logger.info(f"[Verificação BG] user={discord_id} ícone atual: {current_icon} | esperado: {v['target_icon_id']}")
+                logger.info(f"[BG] user={discord_id} ícone atual: {current_icon} | esperado: {v['target_icon_id']}")
 
                 if current_icon == v['target_icon_id']:
                     self.pending_verifications.pop(discord_id, None)
@@ -169,8 +177,9 @@ class Auth(commands.Cog):
                         discord_id, v['puuid'], v['account_data'],
                         v['lanes'], current_icon, self.riot_service, v['message']
                     )
+
             except Exception as e:
-                logger.error(f"Erro na verificação background de {discord_id}: {e}")
+                logger.error(f"Erro na verificação BG de {discord_id}: {e}")
 
     @background_verify.before_loop
     async def before_verify(self):
@@ -208,10 +217,6 @@ class Auth(commands.Cog):
 
     @commands.command(name="registrar")
     async def registrar(self, ctx, *, args: str = None):
-        """
-        Uso: .registrar Nick#TAG MainLane [SecLane]
-        Ex: .registrar Faker#KR1 Mid Top
-        """
         if not args:
             embed = discord.Embed(title="❌ Formato Inválido", color=0xff0000)
             embed.description = (
@@ -243,11 +248,10 @@ class Auth(commands.Cog):
         # Bloqueia se já tem verificação pendente
         if ctx.author.id in self.pending_verifications:
             v = self.pending_verifications[ctx.author.id]
-            remaining = int((v['expires_at'] - __import__('datetime').datetime.utcnow()).total_seconds() / 60)
+            remaining = max(0, int((v['expires_at'] - datetime.utcnow()).total_seconds() / 60))
             return await ctx.reply(
                 f"⏳ Você já tem uma verificação em andamento para **{v['account_data']['gameName']}**.\n"
-                f"O bot está verificando automaticamente — aguarde até **{remaining} minuto(s)**.\n"
-                f"Se quiser cancelar e recomeçar, aguarde expirar ou peça ao admin.",
+                f"Aguarde até **{remaining} minuto(s)** ou peça ao admin para cancelar.",
                 delete_after=20
             )
 
@@ -264,7 +268,7 @@ class Auth(commands.Cog):
 
             summoner_data = await self.riot_service.get_summoner_by_puuid(account_data['puuid'])
             if summoner_data == "RIOT_SERVER_ERROR":
-                await msg_wait.edit(content="⚠️ Os servidores da Riot estão instáveis no momento. Tente novamente em alguns minutos.")
+                await msg_wait.edit(content="⚠️ Os servidores da Riot estão instáveis. Tente novamente em alguns minutos.")
                 return
             if not summoner_data:
                 await msg_wait.edit(content="❌ Conta encontrada, mas sem dados de summoner. A conta já jogou League of Legends?")
@@ -284,11 +288,10 @@ class Auth(commands.Cog):
             embed = discord.Embed(
                 title="🛡️ Verificação de Segurança",
                 description=(
-                    f"Para confirmar **{riot_id}**, troque seu ícone no LoL para o mesmo da imagem ao lado.\n"
-                    f"Depois clique no botão ou aguarde — **a verificação é automática**.\n\n"
-                    f"O bot detecta a troca automaticamente a cada **1 minuto** por até **{VERIFY_TIMEOUT_MINUTES} minutos**.\n\n"
-                    f"**IMPORTANTE:** Após a verificação, pode trocar o ícone de volta.\n"
-                    f"Este ícone estará no final da sua lista de ícones dentro do LoL."
+                    f"Para confirmar **{riot_id}**, troque seu ícone no LoL para o da imagem ao lado.\n\n"
+                    f"Depois clique em **Já troquei!** — o bot irá verificar automaticamente.\n\n"
+                    f"**IMPORTANTE:** Não troque o ícone de volta até o cadastro ser concluído.\n"
+                    f"Este ícone fica no final da lista de ícones dentro do LoL."
                 ),
                 color=0xffcc00
             )
@@ -307,14 +310,15 @@ class Auth(commands.Cog):
             sent_message = await ctx.reply(embed=embed, view=view)
             view.message = sent_message
 
-            # Registra verificação pendente para o background task
             self.pending_verifications[ctx.author.id] = {
                 'puuid': account_data['puuid'],
                 'target_icon_id': target_icon_id,
                 'account_data': account_data,
                 'lanes': lanes_data,
                 'message': sent_message,
+                'channel': ctx.channel,
                 'expires_at': datetime.utcnow() + timedelta(minutes=VERIFY_TIMEOUT_MINUTES),
+                'button_clicked': False,
             }
 
         except Exception as e:
@@ -324,6 +328,46 @@ class Auth(commands.Cog):
             except Exception:
                 pass
             await ctx.reply("💥 Erro interno ao conectar com a Riot.")
+
+
+    @commands.command(name="desvincular", aliases=["desregistrar"])
+    async def desvincular(self, ctx, membro: discord.Member = None):
+        """
+        Remove o vínculo de uma conta Riot do bot.
+        Uso: .desvincular              → remove sua própria conta
+             .desvincular @user        → admin remove a conta de outro usuário
+        """
+        # Admin pode desvincular qualquer um; usuário comum só a si mesmo
+        if membro and membro != ctx.author:
+            if not ctx.author.guild_permissions.administrator:
+                return await ctx.reply("⛔ Apenas administradores podem desvincular a conta de outro usuário.", delete_after=10)
+            target = membro
+        else:
+            target = ctx.author
+
+        player = await PlayerRepository.get_player_by_discord_id(target.id)
+        if not player:
+            return await ctx.reply(f"❌ **{target.display_name}** não está registrado no bot.", delete_after=10)
+
+        riot_name = player.riot_name or "conta desconhecida"
+
+        # Cancela verificação pendente se houver
+        self.pending_verifications.pop(target.id, None)
+
+        await PlayerRepository.delete_player(target.id)
+
+        if target == ctx.author:
+            await ctx.reply(
+                f"✅ Conta **{riot_name}** desvinculada com sucesso.\n"
+                f"Use `.registrar` para vincular uma nova conta quando quiser."
+            )
+        else:
+            await ctx.reply(f"✅ Conta **{riot_name}** de {target.mention} desvinculada pelo admin.")
+
+    @desvincular.error
+    async def desvincular_error(self, ctx, error):
+        if isinstance(error, commands.MemberNotFound):
+            await ctx.reply("❌ Membro não encontrado. Mencione alguém do servidor.", delete_after=8)
 
 
 async def setup(bot: commands.Bot):
