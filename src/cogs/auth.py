@@ -19,6 +19,31 @@ VERIFY_INTERVAL_SECONDS = 20
 
 async def _complete_registration(discord_id, puuid, account_data, lanes, current_icon, riot_service, message, channel, member):
     """Finaliza o registro: salva no banco, calcula MMR, edita o embed e pinga no canal."""
+
+    # Verifica se o PUUID já está vinculado a outro Discord
+    existing = await PlayerRepository.get_player_by_puuid(puuid)
+    if existing and existing.discord_id != discord_id:
+        try:
+            embed_err = discord.Embed(
+                title="❌ Conta já vinculada",
+                description=(
+                    f"A conta **{account_data['gameName']}** já está registrada por outro usuário.\n"
+                    f"Cada conta Riot só pode ser vinculada a um Discord por vez.\n\n"
+                    f"Se acredita que isso é um erro, contate um administrador."
+                ),
+                color=0xff0000
+            )
+            await message.edit(embed=embed_err, view=None)
+        except Exception:
+            pass
+        try:
+            await channel.send(
+                f"{member.mention} ❌ A conta **{account_data['gameName']}** já está registrada por outro usuário no bot."
+            )
+        except Exception:
+            pass
+        return
+
     full_data = {**account_data, 'profileIconId': current_icon}
 
     await PlayerRepository.upsert_player(

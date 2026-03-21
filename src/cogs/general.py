@@ -89,6 +89,15 @@ class HelpSelect(discord.ui.Select):
                 ),
                 inline=False,
             )
+            embed.add_field(
+                name="🔓 `.desvincular [@usuario]`",
+                value=(
+                    "Remove o vínculo da sua conta Riot do bot.\n"
+                    "Sem argumento: desvincula a própria conta.\n"
+                    "Com `@usuario` *(admin)*: desvincula a conta de outro membro."
+                ),
+                inline=False,
+            )
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             embed.add_field(

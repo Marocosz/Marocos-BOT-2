@@ -61,6 +61,12 @@ class PlayerRepository:
             return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_player_by_puuid(puuid: str):
+        async with get_session() as session:
+            result = await session.execute(select(Player).where(Player.riot_puuid == puuid))
+            return result.scalar_one_or_none()
+
+    @staticmethod
     async def get_all_players_with_puuid():
         async with get_session() as session:
             result = await session.execute(select(Player).where(Player.riot_puuid.isnot(None)))
