@@ -237,6 +237,17 @@ class Auth(commands.Cog):
             await ctx.reply("❌ Lane principal inválida! Use: Top, Jungle, Mid, Adc ou Sup.")
             return
 
+        # Bloqueia se já tem verificação pendente
+        if ctx.author.id in self.pending_verifications:
+            v = self.pending_verifications[ctx.author.id]
+            remaining = int((v['expires_at'] - __import__('datetime').datetime.utcnow()).total_seconds() / 60)
+            return await ctx.reply(
+                f"⏳ Você já tem uma verificação em andamento para **{v['account_data']['gameName']}**.\n"
+                f"O bot está verificando automaticamente — aguarde até **{remaining} minuto(s)**.\n"
+                f"Se quiser cancelar e recomeçar, aguarde expirar ou peça ao admin.",
+                delete_after=20
+            )
+
         lanes_data = {'main': main_lane, 'sec': sec_lane}
         msg_wait = await ctx.reply("⏳ Buscando conta na Riot...")
 

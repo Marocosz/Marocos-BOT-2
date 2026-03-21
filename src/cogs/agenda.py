@@ -346,6 +346,34 @@ class Agenda(commands.Cog):
         embed.set_footer(text=".agenda <ID> para ver detalhes · .cancelar_agenda <ID> para cancelar")
         await ctx.reply(embed=embed)
 
+    @commands.command(name="anular_agenda")
+    @commands.has_permissions(administrator=True)
+    async def anular_agenda(self, ctx: commands.Context, event_id: int):
+        """Anula um evento silenciosamente (sem DM para os confirmados)."""
+        event = await self._get_and_validate_event(ctx, event_id)
+        if not event:
+            return
+
+        await EventRepository.cancel_event(event_id)
+
+        if event.get('channel_id') and event.get('message_id'):
+            try:
+                ch  = ctx.guild.get_channel(event['channel_id'])
+                msg = await ch.fetch_message(event['message_id'])
+                updated = await EventRepository.get_event(event_id)
+                await msg.edit(embed=build_embed(updated, ctx.guild), view=discord.ui.View())
+            except Exception:
+                pass
+
+        await ctx.reply(
+            f"🗑️ Evento **#{event_id} — {event['title']}** anulado silenciosamente (sem notificação aos confirmados).",
+            delete_after=15
+        )
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass
+
     @commands.command(name="cancelar_agenda")
     @commands.has_permissions(administrator=True)
     async def cancelar_agenda(self, ctx: commands.Context, event_id: int):
@@ -477,6 +505,7 @@ class Agenda(commands.Cog):
 
     # --- ERROR HANDLERS ---
     @agendar.error
+    @anular_agenda.error
     @cancelar_agenda.error
     @add_agenda.error
     @kick_agenda.error
@@ -489,6 +518,7 @@ class Agenda(commands.Cog):
         elif isinstance(error, commands.MissingRequiredArgument):
             examples = {
                 'agendar': '`.agendar 21/03/2025 21:00 Sexta Ranqueada`',
+                'anular_agenda': '`.anular_agenda <ID>`',
                 'cancelar_agenda': '`.cancelar_agenda <ID>`',
                 'add_agenda': '`.add_agenda <ID> @membro`',
                 'kick_agenda': '`.kick_agenda <ID> @membro`',
