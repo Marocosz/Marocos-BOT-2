@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 import random
-import asyncio
 import logging
 
 log = logging.getLogger(__name__)
@@ -39,11 +38,13 @@ class Zoeira(commands.Cog):
                 log.warning(f"[Zoeira] Falhou ao reagir com marocosbot1: {e}")
 
         if self.torres_tomate_ativo and message.author.id == self.TORRES_ID:
-            try:
-                await message.add_reaction("🍅")
-                log.info(f"[Zoeira] Reagiu com 🍅 na msg do Torres em #{message.channel}")
-            except Exception as e:
-                log.warning(f"[Zoeira] Falhou ao reagir com tomate: {e}")
+            torres_reacoes = ["🍅", "🤡", "💀", "🗑️", "🤢", "😬", "🦆", "🪣", "🥴", "👎", "🐸"]
+            for emoji in torres_reacoes:
+                try:
+                    await message.add_reaction(emoji)
+                except Exception as e:
+                    log.warning(f"[Zoeira] Falhou ao reagir com {emoji} no Torres: {e}")
+            log.info(f"[Zoeira] Bombardeou msg do Torres com {len(torres_reacoes)} reações em #{message.channel}")
 
     @commands.command(name="fdp")
     async def fdp_command(self, ctx: commands.Context):
