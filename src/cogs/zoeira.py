@@ -13,7 +13,7 @@ class Zoeira(commands.Cog):
         self.TORRES_ID = 410171778971992085
 
         # --- TOGGLE: reagir com 🍅 em toda msg do Torres ---
-        self.torres_tomate_ativo = True
+        self.torres_tomate_ativo = False
 
         # Lista de mensagens estruturadas (Target: None para não marcar)
         self.insults = [
