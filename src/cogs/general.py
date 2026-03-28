@@ -361,7 +361,8 @@ class HelpSelect(discord.ui.Select):
                     "**`.anular_agenda <ID>`** — cancela silenciosamente (sem DM)\n"
                     "**`.add_agenda <ID> @user`** — adiciona membro\n"
                     "**`.kick_agenda <ID> @user`** — remove membro\n"
-                    "**`.iniciar_agenda <ID>`** — inicia o evento e pinga todos"
+                    "**`.iniciar_agenda <ID>`** — inicia o evento e pinga todos\n"
+                    "**`.notificar_agenda <ID>`** — envia DM de lembrete aos confirmados *(até 30 min após o início)*"
                 ),
                 inline=False,
             )
@@ -372,7 +373,8 @@ class HelpSelect(discord.ui.Select):
                 value=(
                     "**`.config_cargo vencedor @Cargo`** — define cargo do time vencedor\n"
                     "**`.config_cargo perdedor @Cargo`** — define cargo do time perdedor\n"
-                    "*(Atribuídos automaticamente após cada `.resultado`)*"
+                    "**`.ver_cargos`** — exibe os cargos configurados no servidor\n"
+                    "*(Atribuídos automaticamente após cada `.resultado`, com anúncio no canal)*"
                 ),
                 inline=False,
             )
