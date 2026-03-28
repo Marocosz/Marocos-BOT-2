@@ -237,6 +237,18 @@ class Admin(commands.Cog):
         label = "Vencedor" if role_type == 'winner' else "Perdedor"
         await ctx.reply(f"✅ Cargo de **{label}** definido para {cargo.mention}.")
 
+    @commands.command(name="ver_cargos")
+    @commands.has_permissions(administrator=True)
+    async def ver_cargos(self, ctx: commands.Context):
+        """Exibe os cargos de vencedor e perdedor configurados no servidor."""
+        winner_role_id, loser_role_id = await GuildRepository.get_match_roles(ctx.guild.id)
+        winner = ctx.guild.get_role(winner_role_id).mention if winner_role_id else "❌ Não configurado"
+        loser  = ctx.guild.get_role(loser_role_id).mention  if loser_role_id  else "❌ Não configurado"
+        embed = discord.Embed(title="🎖️ Cargos da Liga", color=0x3498db)
+        embed.add_field(name="🏆 Vencedor", value=winner, inline=False)
+        embed.add_field(name="💀 Perdedor", value=loser,  inline=False)
+        await ctx.reply(embed=embed)
+
     @config_cargo.error
     async def config_cargo_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.MissingPermissions):

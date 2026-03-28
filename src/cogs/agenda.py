@@ -501,6 +501,31 @@ class Agenda(commands.Cog):
         except Exception as e:
             logger.warning(f"Não foi possível atualizar embed do evento #{event_id}: {e}")
 
+    @commands.command(name="notificar_agenda")
+    @commands.has_permissions(administrator=True)
+    async def notificar_agenda(self, ctx: commands.Context, event_id: int):
+        """Envia manualmente a notificação de um evento para todos os confirmados.
+        Só funciona se o evento ainda não começou ou até 30 min após o início."""
+        event = await self._get_and_validate_event(ctx, event_id, require_open=False)
+        if not event:
+            return
+
+        if not event['player_ids']:
+            return await ctx.reply(f"❌ Evento #{event_id} não tem nenhum confirmado.")
+
+        now = datetime.utcnow()
+        dt  = event['scheduled_for']
+        diff_after_start = (now - dt).total_seconds()
+
+        if diff_after_start > 1800:  # mais de 30 min após o início
+            return await ctx.reply(
+                f"❌ Não é possível notificar. O evento já começou há mais de 30 minutos "
+                f"({int(diff_after_start // 60)} min atrás)."
+            )
+
+        await self._send_reminder(event, '30min')
+        await ctx.reply(f"✅ Notificação enviada por DM para **{len(event['player_ids'])}** confirmado(s) do evento #{event_id}.")
+
     # --- ERROR HANDLERS ---
     @agendar.error
     @anular_agenda.error
@@ -508,6 +533,7 @@ class Agenda(commands.Cog):
     @add_agenda.error
     @kick_agenda.error
     @iniciar_agenda.error
+    @notificar_agenda.error
     async def agenda_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.reply("⛔ Apenas administradores podem usar este comando.")
